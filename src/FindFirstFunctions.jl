@@ -1,5 +1,10 @@
 module FindFirstFunctions
 
+"""
+    findfirstequal(x::Int64,A::DenseVector{Int64})
+
+Finds the first value in `A` equal to `x`
+"""
 findfirstequal(vpivot, ivars) = findfirst(isequal(vpivot), ivars)
 function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
   GC.@preserve ivars begin
@@ -121,6 +126,12 @@ function bracketstrictlymontonic(v::AbstractVector,
     return lo, hi
 end
 
+"""
+    searchsortedfirstcorrelated(v::AbstractVector{T}, x, guess)
+
+An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess::T`
+to start the search from.
+"""
 function searchsortedfirstcorrelated(v::AbstractVector, x, guess)
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
     searchsortedfirst(v, x, lo, hi, Base.Order.Forward)
