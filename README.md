@@ -41,7 +41,7 @@ See `sort!` for an explanation of the keyword arguments `by`, `lt` and `rev`.
 ### `searchsortedfirstcorrelated(v::AbstractVector, x, guess)`
 
 ```julia
-searchsortedfirstcorrelated(v::AbstractVector, x, guess)
+searchsortedfirstcorrelated(v::AbstractVector{T}, x, guess::T)
 ```
 
 An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess`
