@@ -79,7 +79,7 @@ end
 Note that this differs from `searchsortedfirst` by returning `nothing` when absent.
 """
 function findfirstsortedequal(var::Int64, vars::DenseVector{Int64},
-  ::Val{basecase}=Val(64)) where {basecase}
+  ::Val{basecase}=Val(16)) where {basecase}
   len = length(vars)
   offset = 0
   @inbounds while len > basecase
