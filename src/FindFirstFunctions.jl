@@ -91,7 +91,7 @@ purpose of using this function first would be to accelerate convergence in those
 by using correlated `guess`es for repeated calls.  The best `guess` for the next call of
 this function would be the index returned by the previous call to `searchsorted`.
 
-See [`sort!`](@ref) for an explanation of the keyword arguments `by`, `lt` and `rev`.
+See `Base.sort!` for an explanation of the keyword arguments `by`, `lt` and `rev`.
 """
 function bracketstrictlymontonic(v::AbstractVector,
         x,
