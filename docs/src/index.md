@@ -14,9 +14,9 @@ Pkg.add("FindFirstFunctions")
 ## Available Functions
 
 ```@docs
-findfirstequal
-bracketstrictlymontonic
-searchsortedfirstcorrelated
+FindFirstFunctions.findfirstequal
+FindFirstFunctions.bracketstrictlymontonic
+FindFirstFunctions.searchsortedfirstcorrelated
 ```
 
 ## Contributing
