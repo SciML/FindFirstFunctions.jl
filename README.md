@@ -46,3 +46,25 @@ searchsortedfirstcorrelated(v::AbstractVector{T}, x, guess::T)
 
 An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess`
 to start the search from.
+
+
+Some benchmarks:
+```julia
+julia> x = rand(Int, 2048); s = sort(x);
+
+julia> @btime findfirst(==($x[1011]), $x)
+  266.427 ns (0 allocations: 0 bytes)
+1011
+
+julia> @btime FindFirstFunctions.findfirstequal($x[1011], $x)
+  67.502 ns (0 allocations: 0 bytes)
+1011
+
+julia> @btime searchsortedfirst($s, $s[1011])
+  8.897 ns (0 allocations: 0 bytes)
+1011
+
+julia> @btime FindFirstFunctions.findfirstsortedequal($s[1011], $s)
+  10.896 ns (0 allocations: 0 bytes)
+1011
+```
