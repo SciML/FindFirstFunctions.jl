@@ -95,13 +95,13 @@ BenchmarkTools.Trial: 2144 samples with 1 evaluation.
 
 julia> @benchmark findbench(FindFirstFunctions.findfirstsortedequal, $s, $perm)
 BenchmarkTools.Trial: 10000 samples with 1 evaluation.
- Range (min … max):  59.956 μs … 83.462 μs  ┊ GC (min … max): 0.00% … 0.00%
- Time  (median):     62.785 μs              ┊ GC (median):    0.00%
- Time  (mean ± σ):   63.281 μs ±  2.168 μs  ┊ GC (mean ± σ):  0.00% ± 0.00%
+ Range (min … max):  46.256 μs … 88.446 μs  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     48.048 μs              ┊ GC (median):    0.00%
+ Time  (mean ± σ):   48.702 μs ±  2.079 μs  ┊ GC (mean ± σ):  0.00% ± 0.00%
 
-       ▁▁▅▆▄▅▆▇██▆▆▅▄▄▂▁                                       
-  ▁▃▅▄█████████████████████▇▆▅▅▄▄▄▄▃▃▃▃▃▃▃▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▁▂▁▂ ▄
-  60 μs           Histogram: frequency by time        70.3 μs <
+      ▂▅▇█▇▇▆▄▃▁                                               
+  ▁▃▆▇███████████▇▇▆▅▅▅▄▄▃▃▃▂▃▂▃▂▂▂▂▂▂▂▂▂▂▂▁▁▂▂▂▂▁▂▁▂▁▂▁▁▂▁▂▂ ▃
+  46.3 μs         Histogram: frequency by time          56 μs <
 
  Memory estimate: 0 bytes, allocs estimate: 0.
 
