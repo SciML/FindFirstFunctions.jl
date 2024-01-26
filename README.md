@@ -50,21 +50,92 @@ to start the search from.
 
 Some benchmarks:
 ```julia
-julia> x = rand(Int, 2048); s = sort(x);
+using Random
+x = rand(Int, 2048); s = sort(x);
+perm = randperm(length(x));
 
-julia> @btime findfirst(==($x[1011]), $x)
-  266.427 ns (0 allocations: 0 bytes)
-1011
+function findbench(f, x, vals)
+    @inbounds for i = eachindex(x, vals)
+        v = vals[i]
+        f(x[v], x) == v || throw("oops")
+    end
+end
 
-julia> @btime FindFirstFunctions.findfirstequal($x[1011], $x)
-  67.502 ns (0 allocations: 0 bytes)
-1011
+@benchmark findbench(FindFirstFunctions.findfirstequal, $x, $perm)
+@benchmark findbench((x,v)->findfirst(==(x), v), $x, $perm)
 
-julia> @btime searchsortedfirst($s, $s[1011])
-  8.897 ns (0 allocations: 0 bytes)
-1011
+@benchmark findbench(FindFirstFunctions.findfirstsortedequal, $s, $perm)
+@benchmark findbench((x,v)->searchsortedfirst(v, x), $s, $perm)
+```
+Sample results using `-Cnative,-prefer-256-bit` on an AVX512 capable laptop:
+```julia
+julia> @benchmark findbench(FindFirstFunctions.findfirstequal, $x, $perm)
+BenchmarkTools.Trial: 9219 samples with 1 evaluation.
+ Range (min … max):  107.094 μs … 137.850 μs  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     107.376 μs               ┊ GC (median):    0.00%
+ Time  (mean ± σ):   107.577 μs ±   1.175 μs  ┊ GC (mean ± σ):  0.00% ± 0.00%
 
-julia> @btime FindFirstFunctions.findfirstsortedequal($s[1011], $s)
-  10.896 ns (0 allocations: 0 bytes)
-1011
+     ▁▇█▆▁                                                       
+  ▂▃▅█████▅▃▂▂▂▂▂▁▁▁▁▁▂▂▂▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▂▁▂▁▁▁▂▂▁▂ ▃
+  107 μs           Histogram: frequency by time          110 μs <
+
+ Memory estimate: 0 bytes, allocs estimate: 0.
+
+julia> @benchmark findbench((x,v)->findfirst(==(x), v), $x, $perm)
+BenchmarkTools.Trial: 2144 samples with 1 evaluation.
+ Range (min … max):  462.442 μs … 584.795 μs  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     464.638 μs               ┊ GC (median):    0.00%
+ Time  (mean ± σ):   465.686 μs ±   5.534 μs  ┊ GC (mean ± σ):  0.00% ± 0.00%
+
+       █ ▅▇▂                                                     
+  ▅▃▁▁▁█▇███▇▆▃▆▃▁▄▃▄▁▃▃▁▁▁▁▃▁▄▁▁▃▁▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▃▃▃▃▃▄▃▁▁▁▃▄▃ █
+  462 μs        Histogram: log(frequency) by time        486 μs <
+
+ Memory estimate: 0 bytes, allocs estimate: 0.
+
+julia> @benchmark findbench(FindFirstFunctions.findfirstsortedequal, $s, $perm)
+BenchmarkTools.Trial: 10000 samples with 1 evaluation.
+ Range (min … max):  59.956 μs … 83.462 μs  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     62.785 μs              ┊ GC (median):    0.00%
+ Time  (mean ± σ):   63.281 μs ±  2.168 μs  ┊ GC (mean ± σ):  0.00% ± 0.00%
+
+       ▁▁▅▆▄▅▆▇██▆▆▅▄▄▂▁                                       
+  ▁▃▅▄█████████████████████▇▆▅▅▄▄▄▄▃▃▃▃▃▃▃▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▁▂▁▂ ▄
+  60 μs           Histogram: frequency by time        70.3 μs <
+
+ Memory estimate: 0 bytes, allocs estimate: 0.
+
+julia> @benchmark findbench((x,v)->searchsortedfirst(v, x), $s, $perm)
+BenchmarkTools.Trial: 10000 samples with 1 evaluation.
+ Range (min … max):  77.387 μs … 108.634 μs  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     79.305 μs               ┊ GC (median):    0.00%
+ Time  (mean ± σ):   81.398 μs ±   4.536 μs  ┊ GC (mean ± σ):  0.00% ± 0.00%
+
+      ▃▆█▆▃                                                     
+  ▁▃▅▇██████▅▄▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▄▄▃▃▂▃▃▃▂▂▁▁▁ ▂
+  77.4 μs         Histogram: frequency by time         92.6 μs <
+
+ Memory estimate: 0 bytes, allocs estimate: 0.
+
+julia> versioninfo()
+Julia Version 1.10.0
+Commit 3120989f39* (2023-12-25 18:01 UTC)
+Build Info:
+
+    Note: This is an unofficial build, please report bugs to the project
+    responsible for this build and not to the Julia project unless you can
+    reproduce the issue using official builds available at https://julialang.org/downloads
+
+Platform Info:
+  OS: Linux (x86_64-redhat-linux)
+  CPU: 8 × 11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz
+  WORD_SIZE: 64
+  LIBM: libopenlibm
+  LLVM: libLLVM-15.0.7 (ORCJIT, tigerlake)
+  Threads: 11 on 8 virtual cores
+Environment:
+  JULIA_PATH = @.
+  LD_LIBRARY_PATH = /usr/local/lib/x86_64-unknown-linux-gnu/:/usr/local/lib/:/usr/local/lib/x86_64-unknown-linux-gnu/:/usr/local/lib/
+  JULIA_NUM_THREADS = 8
+  LD_UN_PATH = /usr/local/lib/x86_64-unknown-linux-gnu/:/usr/local/lib/
 ```
