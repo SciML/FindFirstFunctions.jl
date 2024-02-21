@@ -83,21 +83,36 @@ end
 Note that this differs from `searchsortedfirst` by returning `nothing` when absent.
 """
 function findfirstsortedequal(var::Int64, vars::DenseVector{Int64},
-  ::Val{basecase}=Val(128)) where {basecase}
+  ::Val{basecase}=Base.libllvm_version >= v"17" ? Val(8) : Val(128)) where {basecase}
   len = length(vars)
   offset = 0
   @inbounds while len > basecase
     half = len >>> 1 # half on left, len - half on right
-    offset = ifelse(vars[offset+half+1] <= var, half + offset, offset)
+    if Base.libllvm_version >= v"17"
+      # TODO: check if this works
+      # I'm worried the `!unpredictable` metadata will be stripped
+      offset = Base.llvmcall(("""
+                           define i64 @entry(i8 %0, i64 %1, i64 %2) #0 {
+                           top:
+                               %b = trunc i8 %0 to i1
+                               %s = select i1 %b, i64 %1, i64 %2, !unpredictable !0
+                               ret i64 %s
+                           }
+                           attributes #0 = { alwaysinline }
+                           !0 = !{}
+      """, "entry"), Int64, Tuple{Bool,Int64,Int64}, vars[offset+half+1] <= var, half + offset, offset)
+    else
+      offset = ifelse(vars[offset+half+1] <= var, half + offset, offset)
+    end
     len = len - half
   end
   # maybe occurs in vars[offset+1:offset+len] 
   GC.@preserve vars begin
     ret = _findfirstequal(var, pointer(vars) + 8offset, len)
   end
+  # return ret  
   ret < 0 ? nothing : ret + offset + 1
 end
-
 
 """
     bracketstrictlymontonic(v, x, guess; lt=<comparison>, by=<transform>, rev=false)
