@@ -50,7 +50,7 @@ to start the search from.
 
 Some benchmarks:
 ```julia
-using Random
+using Random, BenchmarkTools, FindFirstFunctions
 x = rand(Int, 2048); s = sort(x);
 perm = randperm(length(x));
 
