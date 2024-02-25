@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/SciML/FindFirstFunctions.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/SciML/FindFirstFunctions.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-FindFirstFunctions.jl is a package for faster `findfirst` type functions. These are specailized to improve performance
+FindFirstFunctions.jl is a package for faster `findfirst` type functions. These are specialized to improve performance
 over more generic implementations.
 
 ## Functions
@@ -141,7 +141,7 @@ Environment:
 ```
 
 
-Note, if you're searching sorted collections and on an x86 CPU, it is worth setting the `ENV` variable `JULIA_LLVM_ARGS="-x86-cmov-converter=false"` before starting Julia, e.g. on an AVX512 capable CPU, you may wish to start Julia from the commad line using
+Note, if you're searching sorted collections and on an x86 CPU, it is worth setting the `ENV` variable `JULIA_LLVM_ARGS="-x86-cmov-converter=false"` before starting Julia, e.g. on an AVX512 capable CPU, you may wish to start Julia from the command line using
 ```sh
 JULIA_LLVM_ARGS="-x86-cmov-converter=false" julia -Cnative,-prefer-256-bit
 ```
@@ -243,14 +243,14 @@ BenchmarkTools.Trial: 10000 samples with 1 evaluation.
 
  Memory estimate: 0 bytes, allocs estimate: 0.
 ```
-The branches in a binary search are unpredicable, thus disabling the conversion of `cmov` into branches results in a substantial performance increase.
+The branches in a binary search are unpredictable, thus disabling the conversion of `cmov` into branches results in a substantial performance increase.
 Additionally, enablig `cmov` (i.e., disabling `cmov` conversion) greatly reduces the optimal base case size for `FindFirstFunctions.findfirstsortedequal`. Without `cmov`, we need a very large base case to avoid too many branches, scanning large swaths contiguously.
 With `cmov`, we can reduce the base case size to `8`, taking several additional binary search steps without incurring heavy branch prediction penalties.
 
-However, we default to a large base case size, under the assumptions users are not setting this `ENV` variable; we assume that an expert user concerned about binary search performace who sets this variable will also be able to choose their own basecase size.
+However, we default to a large base case size, under the assumptions users are not setting this `ENV` variable; we assume that an expert user concerned about binary search performance who sets this variable will also be able to choose their own basecase size.
 
-Take care when benchmarking `JULIA_LLVM_ARGS="-x86-cmov-converter=false"`: your CPU's branch predictor can probably memorize a sequece of hundreds of perfectly random branches. Branch predcitors are great at defeating microbenchmarks.
-Thus, you need a very long unpredictable sequece (which I tried to do in the above benchmark) to prevent the branch predictor from memorizing it.
+Take care when benchmarking `JULIA_LLVM_ARGS="-x86-cmov-converter=false"`: your CPU's branch predictor can probably memorize a sequence of hundreds of perfectly random branches. Branch predcitors are great at defeating microbenchmarks.
+Thus, you need a very long unpredictable sequence (which I tried to do in the above benchmark) to prevent the branch predictor from memorizing it.
 In "real world" workloads, your branch predictor isn't going to be able to memorize a sequence of left vs right bisections in your binary search, as you won't be performing the same searches over and over again!
 Without making your benchmark realistic, the default setting of converting `cmov` into branches will look unrealistically good.
 
