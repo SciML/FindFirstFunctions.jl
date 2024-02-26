@@ -17,6 +17,7 @@ Pkg.add("FindFirstFunctions")
 FindFirstFunctions.findfirstequal
 FindFirstFunctions.bracketstrictlymontonic
 FindFirstFunctions.searchsortedfirstcorrelated
+FindFirstFunctions.findfirstsortedequal
 ```
 
 ## Contributing
