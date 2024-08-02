@@ -16,6 +16,7 @@ Pkg.add("FindFirstFunctions")
 ```@docs
 FindFirstFunctions.findfirstequal
 FindFirstFunctions.bracketstrictlymontonic
+FindFirstFunctions.looks_linear
 FindFirstFunctions.Guesser
 FindFirstFunctions.searchsortedfirstcorrelated
 FindFirstFunctions.searchsortedlastcorrelated
