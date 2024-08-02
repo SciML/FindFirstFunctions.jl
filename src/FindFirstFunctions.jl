@@ -192,22 +192,100 @@ function bracketstrictlymontonic(
 end
 
 """
-    searchsortedfirstcorrelated(v::AbstractVector{T}, x, guess)
+    looks_linear(v; threshold = 1e-2)
 
-An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess::T`
+Determine if the abscissae `v` are regularly distributed, taking the standard deviation of
+the difference between the array of abscissae with respect to the straight line linking
+its first and last elements, normalized by the range of `v`. If this standard deviation is
+below the given `threshold`, the vector looks linear (return true). Internal function -
+interface may change.
+"""
+function looks_linear(v; threshold = 1e-2)
+    length(v) <= 2 && return true
+    x_0, x_f = first(v), last(v)
+    N = length(v)
+    x_span = x_f - x_0
+    mean_x_dist = x_span / (N - 1)
+    norm_var =
+        sum((x_i - x_0 - (i - 1) * mean_x_dist)^2 for (i, x_i) in enumerate(v)) /
+        (N * x_span^2)
+    norm_var < threshold^2
+end
+
+"""
+    Guesser(v::AbstractVector; looks_linear_threshold = 1e-2)
+
+Wrapper of the searched vector `v` which makes an informed guess 
+for `searchsorted*correlated` by either
+- Exploiting that `v` is sufficiently evenly spaced
+- Using the previous outcome of `searchsorted*correlated` 
+"""
+struct Guesser{T<:AbstractVector}
+    v::T
+    idx_prev::Base.RefValue{Int}
+    linear_lookup::Bool
+end
+
+function Guesser(v::AbstractVector; looks_linear_threshold = 1e-2)
+    Guesser(v, Ref(1), looks_linear(v; threshold = looks_linear_threshold))
+end
+
+function (g::Guesser)(x)
+    (; v, idx_prev, linear_lookup) = g
+    if linear_lookup
+        f = (x - first(v)) / (last(v) - first(v))
+        if isinf(f)
+            f > 0 ? lastindex(v) : firstindex(v)
+        else
+            i_0, i_f = firstindex(v), lastindex(v)
+            round(typeof(firstindex(v)), f * (i_f - i_0) + i_0)
+        end
+    else
+        idx_prev[]
+    end
+end
+
+"""
+    searchsortedfirstcorrelated(v::AbstractVector, x, guess)
+
+An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
 to start the search from.
 """
-function searchsortedfirstcorrelated(v::AbstractVector, x, guess)
+function searchsortedfirstcorrelated(v::AbstractVector, x, guess::T) where {T<:Integer}
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
     searchsortedfirst(v, x, lo, hi, Base.Order.Forward)
 end
 
-function searchsortedlastcorrelated(v::AbstractVector, x, guess)
+"""
+    searchsortedlastcorrelated(v::AbstractVector{T}, x, guess)
+
+An accelerated `findlast` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
+to start the search from.
+"""
+function searchsortedlastcorrelated(v::AbstractVector, x, guess::T) where {T<:Integer}
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
     searchsortedlast(v, x, lo, hi, Base.Order.Forward)
 end
 
-searchsortedfirstcorrelated(r::AbstractRange, x, _) = searchsortedfirst(r, x)
-searchsortedlastcorrelated(r::AbstractRange, x, _) = searchsortedlast(r, x)
+searchsortedfirstcorrelated(r::AbstractRange, x, ::Integer) = searchsortedfirst(r, x)
+searchsortedlastcorrelated(r::AbstractRange, x, ::Integer) = searchsortedlast(r, x)
 
+function searchsortedfirstcorrelated(
+    v::AbstractVector,
+    x,
+    guess::Guesser{T},
+) where {T<:AbstractVector}
+    @assert v === guess.v
+    out = searchsortedfirstcorrelated(v, x, guess(x))
+    guess.idx_prev[] = out
+    out
 end
+
+function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T<:AbstractVector}
+    @assert v === guess.v
+    out = searchsortedlastcorrelated(v, x, guess(x))
+    guess.idx_prev[] = out
+    out
+end
+
+end # module FindFirstFunctions
