@@ -39,5 +39,19 @@ using SafeTestsets, Test
         @test searchsortedfirstcorrelated(v, 4.0, guesser_linear) == 3
         @test searchsortedlastcorrelated(v, 4.0, guesser_prev) == 2
         @test guesser_prev.idx_prev[] == 2
+
+        # Edge case 
+        v1 = [42.0]
+        guesser = Guesser(v1)
+        @test guesser_linear.linear_lookup
+        @test guesser(100) == 1
+        @test guesser(42.0) == 1
+        @test guesser(0) == 1
+        @test searchsortedfirstcorrelated(v1, 0, guesser) == 1
+        @test searchsortedfirstcorrelated(v1, 100, guesser) == 1 + 1  # see searchsortedfirst
+        @test searchsortedfirstcorrelated(v1, 42.0, guesser) == 1
+        @test searchsortedlastcorrelated(v1, 0, guesser) == 1 - 1 # see searchsortedlast
+        @test searchsortedlastcorrelated(v1, 100, guesser) == 1
+        @test searchsortedlastcorrelated(v1, 42.0, guesser) == 1
     end
 end

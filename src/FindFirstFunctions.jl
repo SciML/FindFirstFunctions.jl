@@ -233,7 +233,9 @@ end
 function (g::Guesser)(x)
     (; v, idx_prev, linear_lookup) = g
     if linear_lookup
-        f = (x - first(v)) / (last(v) - first(v))
+        δx = x - first(v)
+        δx == 0 && return firstindex(v)
+        f = δx / (last(v) - first(v))
         if isinf(f)
             f > 0 ? lastindex(v) : firstindex(v)
         else
