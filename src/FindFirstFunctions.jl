@@ -238,12 +238,14 @@ function (g::Guesser)(x)
             f > 0 ? lastindex(v) : firstindex(v)
         else
             i_0, i_f = firstindex(v), lastindex(v)
-            i_appr = f * (i_f - i_0) + i_0
-            target_type = typeof(firstindex(v))
-            if typemin(target_type) <= i_appr <= typemax(target_type)
-                round(target_type, i_appr)
+            i_approx = f * (i_f - i_0) + i_0
+            target_type = eltype(v)
+            if i_approx <= typemin(target_type)
+                firstindex(v) - 1
+            elseif i >= typemax(target_type)
+                lastindex(v) + 1
             else
-                idx_prev[]
+                round(target_type, i_appr)
             end
         end
     else
