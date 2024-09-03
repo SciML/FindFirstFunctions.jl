@@ -37,6 +37,7 @@ using SafeTestsets, Test
         guesser_prev = Guesser(v, Ref(1), false)
         @test guesser_linear.linear_lookup
         @test searchsortedfirstcorrelated(v, 4.0, guesser_linear) == 3
+        @test searchsortedfirstcorrelated(v, 1.4234326478e24, guesser_linear) == 5
         @test searchsortedlastcorrelated(v, 4.0, guesser_prev) == 2
         @test guesser_prev.idx_prev[] == 2
     end
