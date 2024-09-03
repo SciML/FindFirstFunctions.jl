@@ -238,9 +238,10 @@ function (g::Guesser)(x)
             f > 0 ? lastindex(v) : firstindex(v)
         else
             i_0, i_f = firstindex(v), lastindex(v)
-            try
-                round(typeof(firstindex(v)), f * (i_f - i_0) + i_0)
-            catch
+            i_appr = f * (i_f - i_0) + i_0
+            if typemin(Int64) <= x <= typemax(Int64)
+                round(typeof(firstindex(v)), i_appr)
+            else
                 idx_prev[]
             end
         end
