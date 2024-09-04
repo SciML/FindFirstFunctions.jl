@@ -240,7 +240,15 @@ function (g::Guesser)(x)
             f > 0 ? lastindex(v) : firstindex(v)
         else
             i_0, i_f = firstindex(v), lastindex(v)
-            round(typeof(firstindex(v)), f * (i_f - i_0) + i_0)
+            i_approx = f * (i_f - i_0) + i_0
+            target_type = typeof(firstindex(v))
+            if i_approx >= typemax(target_type)
+                lastindex(v) + 1
+            elseif i_approx <= typemin(target_type)
+                firstindex(v) - 1
+            else
+                round(target_type, i_approx)
+            end
         end
     else
         idx_prev[]
