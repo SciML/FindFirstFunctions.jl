@@ -26,15 +26,21 @@ version = "4.1.1"
     [deps.Adapt.weakdeps]
     StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
+[[deps.AliasTables]]
+deps = ["PtrArrays", "Random"]
+git-tree-sha1 = "9876e1e164b144ca45e9e3198d0b689cadfed9ff"
+uuid = "66dad0bd-aa9a-41b7-9441-69ab47430ed8"
+version = "1.1.3"
+
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
 version = "1.1.2"
 
 [[deps.ArrayInterface]]
 deps = ["Adapt", "LinearAlgebra"]
-git-tree-sha1 = "d5140b60b87473df18cf4fe66382b7c3596df047"
+git-tree-sha1 = "017fcb757f8e921fb44ee063a7aafe5f89b86dd1"
 uuid = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
-version = "7.17.1"
+version = "7.18.0"
 
     [deps.ArrayInterface.extensions]
     ArrayInterfaceBandedMatricesExt = "BandedMatrices"
@@ -350,9 +356,9 @@ version = "0.8.5"
 
 [[deps.Fontconfig_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Expat_jll", "FreeType2_jll", "JLLWrappers", "Libdl", "Libuuid_jll", "Zlib_jll"]
-git-tree-sha1 = "db16beca600632c95fc8aca29890d83788dd8b23"
+git-tree-sha1 = "21fac3c77d7b5a9fc03b0ec503aa1a6392c34d2b"
 uuid = "a3f928ae-7b40-5064-980b-68af3947d34b"
-version = "2.13.96+0"
+version = "2.15.0+0"
 
 [[deps.Format]]
 git-tree-sha1 = "9c68794ef81b08086aeb32eeaf33531668d5f5fc"
@@ -443,15 +449,15 @@ version = "1.0.2"
 
 [[deps.HTTP]]
 deps = ["Base64", "CodecZlib", "ConcurrentUtilities", "Dates", "ExceptionUnwrapping", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "PrecompileTools", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
-git-tree-sha1 = "ae350b8225575cc3ea385d4131c81594f86dfe4f"
+git-tree-sha1 = "627fcacdb7cb51dc67f557e1598cdffe4dda386d"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "1.10.12"
+version = "1.10.14"
 
 [[deps.HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll"]
-git-tree-sha1 = "401e4f3f30f43af2c8478fc008da50096ea5240f"
+git-tree-sha1 = "55c53be97790242c29031e5cd45e8ac296dadda3"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
-version = "8.3.1+0"
+version = "8.5.0+0"
 
 [[deps.IOCapture]]
 deps = ["Logging", "Random"]
@@ -650,9 +656,9 @@ version = "1.11.0"
 
 [[deps.LogExpFunctions]]
 deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
-git-tree-sha1 = "a2d09619db4e765091ee5c6ffe8872849de0feea"
+git-tree-sha1 = "13ca9e2586b89836fd20cccf56e57e2b9ae7f38f"
 uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
-version = "0.3.28"
+version = "0.3.29"
 
     [deps.LogExpFunctions.extensions]
     LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
@@ -909,6 +915,11 @@ deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 version = "1.11.0"
 
+[[deps.PtrArrays]]
+git-tree-sha1 = "77a42d78b6a92df47ab37e177b2deac405e1c88f"
+uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
+version = "1.2.1"
+
 [[deps.Qt6Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Vulkan_Loader_jll", "Xorg_libSM_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_cursor_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "libinput_jll", "xkbcommon_jll"]
 git-tree-sha1 = "492601870742dcd38f233b23c3ec629628c1d724"
@@ -1032,9 +1043,9 @@ version = "1.11.0"
 
 [[deps.SpecialFunctions]]
 deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
-git-tree-sha1 = "2f5d4697f21388cbe1ff299430dd169ef97d7e14"
+git-tree-sha1 = "64cca0c26b4f31ba18f13f6c12af7c85f478cfde"
 uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
-version = "2.4.0"
+version = "2.5.0"
 
     [deps.SpecialFunctions.extensions]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
@@ -1070,10 +1081,10 @@ uuid = "82ae8749-77ed-4fe6-ae5f-f523153014b0"
 version = "1.7.0"
 
 [[deps.StatsBase]]
-deps = ["DataAPI", "DataStructures", "LinearAlgebra", "LogExpFunctions", "Missings", "Printf", "Random", "SortingAlgorithms", "SparseArrays", "Statistics", "StatsAPI"]
-git-tree-sha1 = "5cf7606d6cef84b543b483848d4ae08ad9832b21"
+deps = ["AliasTables", "DataAPI", "DataStructures", "LinearAlgebra", "LogExpFunctions", "Missings", "Printf", "Random", "SortingAlgorithms", "SparseArrays", "Statistics", "StatsAPI"]
+git-tree-sha1 = "29321314c920c26684834965ec2ce0dacc9cf8e5"
 uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
-version = "0.34.3"
+version = "0.34.4"
 
 [[deps.StringManipulation]]
 deps = ["PrecompileTools"]
