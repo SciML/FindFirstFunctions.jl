@@ -63,13 +63,13 @@ function _findfirstequal(vpivot::Int64, ptr::Ptr{Int64}, len::Int64)
                     }
                     attributes #0 = { alwaysinline }
  """,
-            "entry",
+            "entry"
         ),
         Int64,
-        Tuple{Int64,Ptr{Int64},Int64},
+        Tuple{Int64, Ptr{Int64}, Int64},
         vpivot,
         ptr,
-        len,
+        len
     )
 end
 
@@ -87,14 +87,14 @@ function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
 end
 
 """
-  findfirstsortedequal(vars::DenseVector{Int64}, var::Int64)::Union{Int64,Nothing}
+findfirstsortedequal(vars::DenseVector{Int64}, var::Int64)::Union{Int64,Nothing}
 
 Note that this differs from `searchsortedfirst` by returning `nothing` when absent.
 """
 function findfirstsortedequal(
-    var::Int64,
-    vars::DenseVector{Int64},
-    ::Val{basecase} = Base.libllvm_version >= v"17" ? Val(8) : Val(128),
+        var::Int64,
+        vars::DenseVector{Int64},
+        ::Val{basecase} = Base.libllvm_version >= v"17" ? Val(8) : Val(128)
 ) where {basecase}
     len = length(vars)
     offset = 0
@@ -115,16 +115,16 @@ function findfirstsortedequal(
                      attributes #0 = { alwaysinline }
                      !0 = !{}
 """,
-                    "entry",
+                    "entry"
                 ),
                 Int64,
-                Tuple{Bool,Int64,Int64},
-                vars[offset+half+1] <= var,
+                Tuple{Bool, Int64, Int64},
+                vars[offset + half + 1] <= var,
                 half + offset,
-                offset,
+                offset
             )
         else
-            offset = ifelse(vars[offset+half+1] <= var, half + offset, offset)
+            offset = ifelse(vars[offset + half + 1] <= var, half + offset, offset)
         end
         len = len - half
     end
@@ -139,8 +139,7 @@ end
 """
     bracketstrictlymontonic(v, x, guess; lt=<comparison>, by=<transform>, rev=false)
 
-Starting from an initial `guess` index, find indices `(lo, hi)` such that `v[lo] ≤ x ≤
-v[hi]` according to the specified order, assuming that `x` is actually within the range of
+Starting from an initial `guess` index, find indices `(lo, hi)` such that `v[lo] ≤ x ≤ v[hi]` according to the specified order, assuming that `x` is actually within the range of
 values found in `v`.  If `x` is outside that range, either `lo` will be `firstindex(v)` or
 `hi` will be `lastindex(v)`.
 
@@ -157,11 +156,11 @@ this function would be the index returned by the previous call to `searchsorted`
 See `Base.sort!` for an explanation of the keyword arguments `by`, `lt` and `rev`.
 """
 function bracketstrictlymontonic(
-    v::AbstractVector,
-    x,
-    guess::T,
-    o::Base.Order.Ordering,
-)::NTuple{2,keytype(v)} where {T<:Integer}
+        v::AbstractVector,
+        x,
+        guess::T,
+        o::Base.Order.Ordering
+)::NTuple{2, keytype(v)} where {T <: Integer}
     bottom = firstindex(v)
     top = lastindex(v)
     if guess < bottom || guess > top
@@ -206,21 +205,21 @@ function looks_linear(v; threshold = 1e-2)
     N = length(v)
     x_span = x_f - x_0
     mean_x_dist = x_span / (N - 1)
-    norm_var =
-        sum((x_i - x_0 - (i - 1) * mean_x_dist)^2 for (i, x_i) in enumerate(v)) /
-        (N * x_span^2)
+    norm_var = sum((x_i - x_0 - (i - 1) * mean_x_dist)^2 for (i, x_i) in enumerate(v)) /
+               (N * x_span^2)
     norm_var < threshold^2
 end
 
 """
     Guesser(v::AbstractVector; looks_linear_threshold = 1e-2)
 
-Wrapper of the searched vector `v` which makes an informed guess 
+Wrapper of the searched vector `v` which makes an informed guess
 for `searchsorted*correlated` by either
-- Exploiting that `v` is sufficiently evenly spaced
-- Using the previous outcome of `searchsorted*correlated` 
+
+  - Exploiting that `v` is sufficiently evenly spaced
+  - Using the previous outcome of `searchsorted*correlated`
 """
-struct Guesser{T<:AbstractVector}
+struct Guesser{T <: AbstractVector}
     v::T
     idx_prev::Base.RefValue{Int}
     linear_lookup::Bool
@@ -261,7 +260,7 @@ end
 An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
 to start the search from.
 """
-function searchsortedfirstcorrelated(v::AbstractVector, x, guess::T) where {T<:Integer}
+function searchsortedfirstcorrelated(v::AbstractVector, x, guess::T) where {T <: Integer}
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
     searchsortedfirst(v, x, lo, hi, Base.Order.Forward)
 end
@@ -272,7 +271,7 @@ end
 An accelerated `findlast` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
 to start the search from.
 """
-function searchsortedlastcorrelated(v::AbstractVector, x, guess::T) where {T<:Integer}
+function searchsortedlastcorrelated(v::AbstractVector, x, guess::T) where {T <: Integer}
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
     searchsortedlast(v, x, lo, hi, Base.Order.Forward)
 end
@@ -281,17 +280,17 @@ searchsortedfirstcorrelated(r::AbstractRange, x, ::Integer) = searchsortedfirst(
 searchsortedlastcorrelated(r::AbstractRange, x, ::Integer) = searchsortedlast(r, x)
 
 function searchsortedfirstcorrelated(
-    v::AbstractVector,
-    x,
-    guess::Guesser{T},
-) where {T<:AbstractVector}
+        v::AbstractVector,
+        x,
+        guess::Guesser{T}
+) where {T <: AbstractVector}
     @assert v === guess.v
     out = searchsortedfirstcorrelated(v, x, guess(x))
     guess.idx_prev[] = out
     out
 end
 
-function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T<:AbstractVector}
+function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: AbstractVector}
     @assert v === guess.v
     out = searchsortedlastcorrelated(v, x, guess(x))
     guess.idx_prev[] = out
