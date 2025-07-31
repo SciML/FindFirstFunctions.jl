@@ -13,9 +13,9 @@ makedocs(
     linkcheck = true,
     format = Documenter.HTML(
         assets = ["assets/favicon.ico"],
-        canonical = "https://docs.sciml.ai/FindFirstFunctions/stable/",
+        canonical = "https://docs.sciml.ai/FindFirstFunctions/stable/"
     ),
-    pages = ["index.md"],
+    pages = ["index.md"]
 )
 
 deploydocs(repo = "github.com/SciML/FindFirstFunctions.jl"; push_preview = true)

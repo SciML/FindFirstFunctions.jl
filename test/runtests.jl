@@ -5,7 +5,7 @@ using SafeTestsets, Test
 
     @safetestset "FindFirstFunctions.jl" begin
         using FindFirstFunctions
-        for n = 0:128
+        for n in 0:128
             x = unique!(rand(Int, n))
             s = sort(x)
             for i in eachindex(x)
@@ -15,9 +15,9 @@ using SafeTestsets, Test
             end
             if length(x) > 0
                 @test FindFirstFunctions.findfirstequal(x[begin], @view(x[begin:end])) === 1
-                @test FindFirstFunctions.findfirstequal(x[begin], @view(x[begin+1:end])) ===
+                @test FindFirstFunctions.findfirstequal(x[begin], @view(x[(begin + 1):end])) ===
                       nothing
-                @test FindFirstFunctions.findfirstequal(x[end], @view(x[begin:end-1])) ===
+                @test FindFirstFunctions.findfirstequal(x[end], @view(x[begin:(end - 1)])) ===
                       nothing
             end
             y = rand(Int)
@@ -26,12 +26,12 @@ using SafeTestsets, Test
             ff === nothing &&
                 @test FindFirstFunctions.findfirstsortedequal(y, x) === nothing
         end
-
     end
 
     @safetestset "Guesser" begin
         using FindFirstFunctions:
-            Guesser, searchsortedfirstcorrelated, searchsortedlastcorrelated
+                                  Guesser, searchsortedfirstcorrelated,
+                                  searchsortedlastcorrelated
         v = collect(LinRange(0, 10, 4))
         guesser_linear = Guesser(v)
         guesser_prev = Guesser(v, Ref(1), false)
