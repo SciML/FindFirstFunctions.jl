@@ -1,4 +1,5 @@
 module FindFirstFunctions
+
 # https://github.com/JuliaLang/julia/pull/53687
 const USE_PTR = VERSION >= v"1.12.0-DEV.255"
 const FFE_IR = """
