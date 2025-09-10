@@ -36,4 +36,5 @@ jobs:
     with:
       julia-version: "${{ matrix.version }}"
       os: "${{ matrix.os }}"
+      julia-runtest-depwarn: "error"
     secrets: "inherit"
