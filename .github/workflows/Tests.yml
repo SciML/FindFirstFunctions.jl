@@ -25,7 +25,6 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "min"
           - "1"
           - "lts"
           - "pre"
