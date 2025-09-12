@@ -522,9 +522,9 @@ version = "2.51.1+0"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "GettextRuntime_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Zlib_jll"]
-git-tree-sha1 = "35fbd0cefb04a516104b8e183ce0df11b70a3f1a"
+git-tree-sha1 = "50c11ffab2a3d50192a228c313f05b5b5dc5acb2"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
-version = "2.84.3+0"
+version = "2.86.0+0"
 
 [[deps.Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
