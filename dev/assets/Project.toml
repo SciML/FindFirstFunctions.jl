@@ -7,6 +7,9 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 RegularizationTools = "29dad682-9a27-4bc3-9c72-016788665182"
 StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
 
+[sources]
+FindFirstFunctions = {path = "/home/chrisrackauckas/github-runners/deepsea3-8/_work/FindFirstFunctions.jl/FindFirstFunctions.jl"}
+
 [compat]
 DataInterpolations = "4, 5, 6, 7, 8"
 Documenter = "1"
