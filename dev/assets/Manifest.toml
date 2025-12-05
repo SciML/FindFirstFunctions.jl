@@ -404,7 +404,7 @@ version = "1.15.0"
     Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [[deps.FindFirstFunctions]]
-path = "/home/chrisrackauckas/github-runners/deepsea3-23/_work/FindFirstFunctions.jl/FindFirstFunctions.jl"
+path = "/home/runner/work/FindFirstFunctions.jl/FindFirstFunctions.jl"
 uuid = "64ca27bc-2ba2-4a57-88aa-44e436879224"
 version = "1.4.2"
 
