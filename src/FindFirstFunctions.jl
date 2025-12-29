@@ -297,9 +297,106 @@ function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: Abst
     guess.idx_prev[] = out
     out
 end
+    
+"""
+    searchsortedfirstexp(v, x, lo=firstindex(v), hi=lastindex(v))
+
+Find the first index `i` in sorted vector `v` such that `v[i] >= x`, starting from `lo`.
+This uses an exponential search followed by binary search, which is efficient when
+the target is expected to be near `lo` (e.g., for correlated sequential lookups).
+
+Inspired by Interpolations.jl's `searchsortedfirst_exp_left`.
+"""
+Base.@propagate_inbounds function searchsortedfirstexp(
+        v::AbstractVector,
+        x,
+        lo::Integer = firstindex(v),
+        hi::Integer = lastindex(v)
+)
+    # Linear search for first few elements
+    for i in 0:4
+        ind = lo + i
+        ind > hi && return ind
+        x <= v[ind] && return ind
+    end
+    # Exponential search with doubling steps
+    n = 3
+    tn2 = 2^n
+    tn2m1 = 2^(n - 1)
+    ind = lo + tn2
+    while ind <= hi
+        x <= v[ind] &&
+            return searchsortedfirst(v, x, lo + tn2 - tn2m1, ind, Base.Order.Forward)
+        tn2 *= 2
+        tn2m1 *= 2
+        ind = lo + tn2
+    end
+    return searchsortedfirst(v, x, lo + tn2 - tn2m1, hi, Base.Order.Forward)
+end
+
+"""
+    searchsortedlastvec(v::AbstractVector, x::AbstractVector)
+
+Find the indices for multiple sorted values `x` in sorted vector `v` efficiently.
+If `x` is sorted, this leverages monotonicity to avoid redundant searching.
+Returns indices such that `v[out[i]] <= x[i]` (like `searchsortedlast`).
+
+If `x` is not sorted, falls back to element-wise `searchsortedlast`.
+
+Inspired by Interpolations.jl's `searchsortedfirst_vec`.
+"""
+function searchsortedlastvec(v::AbstractVector, x::AbstractVector)
+    issorted(x) || return searchsortedlast.(Ref(v), x)
+    out = Vector{Int}(undef, length(x))
+    lo = firstindex(v)
+    hi = lastindex(v)
+    @inbounds for i in eachindex(x)
+        xx = x[i]
+        y = searchsortedfirstexp(v, xx, lo, hi)
+        # searchsortedfirstexp returns index of first element >= x
+        # searchsortedlast returns index of last element <= x
+        # If y > hi, x is larger than all elements, return hi
+        # If v[y] == x, return y (first >= is also <=)
+        # If v[y] > x, return y - 1
+        if y > hi
+            out[i] = hi
+        elseif v[y] == xx
+            out[i] = y
+        else
+            out[i] = y - 1
+        end
+        lo = max(y, lo)
+    end
+    return out
+end
+
+"""
+    searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
+
+Find the indices for multiple sorted values `x` in sorted vector `v` efficiently.
+If `x` is sorted, this leverages monotonicity to avoid redundant searching.
+Returns indices such that `v[out[i]] >= x[i]` (like `searchsortedfirst`).
+
+If `x` is not sorted, falls back to element-wise `searchsortedfirst`.
+
+Inspired by Interpolations.jl's `searchsortedfirst_vec`.
+"""
+function searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
+    issorted(x) || return searchsortedfirst.(Ref(v), x)
+    out = Vector{Int}(undef, length(x))
+    lo = firstindex(v)
+    hi = lastindex(v)
+    @inbounds for i in eachindex(x)
+        xx = x[i]
+        y = searchsortedfirstexp(v, xx, lo, hi)
+        out[i] = y
+        lo = min(y, hi)
+    end
+    return out
+end
 
 using PrecompileTools: @compile_workload, @setup_workload
-
+    
 @setup_workload begin
     # Minimal setup for precompilation workload
     vec_int64 = Int64[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
