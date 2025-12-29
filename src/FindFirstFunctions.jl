@@ -298,4 +298,43 @@ function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: Abst
     out
 end
 
+using PrecompileTools
+
+@setup_workload begin
+    # Minimal setup for precompilation workload
+    vec_int64 = Int64[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    linear_vec = collect(1.0:0.5:10.0)
+
+    @compile_workload begin
+        # Precompile the most commonly used functions with typical types
+
+        # findfirstequal: fast SIMD-based search in Int64 vectors
+        findfirstequal(Int64(5), vec_int64)
+        findfirstequal(Int64(100), vec_int64)  # not found case
+
+        # findfirstsortedequal: binary search in sorted Int64 vectors
+        findfirstsortedequal(Int64(8), vec_int64)
+        findfirstsortedequal(Int64(100), vec_int64)  # not found case
+
+        # bracketstrictlymontonic: bracketing for sorted vectors
+        bracketstrictlymontonic(vec_int64, Int64(8), Int64(1), Base.Order.Forward)
+
+        # looks_linear: check if vector is evenly spaced
+        looks_linear(linear_vec)
+
+        # Guesser: wrapper for efficient repeated searches
+        guesser = Guesser(linear_vec)
+        guesser(5.0)
+
+        # searchsortedfirstcorrelated and searchsortedlastcorrelated
+        searchsortedfirstcorrelated(vec_int64, Int64(8), Int64(1))
+        searchsortedlastcorrelated(vec_int64, Int64(8), Int64(1))
+
+        # Also precompile with Guesser
+        guesser_int = Guesser(vec_int64)
+        searchsortedfirstcorrelated(vec_int64, Int64(8), guesser_int)
+        searchsortedlastcorrelated(vec_int64, Int64(8), guesser_int)
+    end
+end
+
 end # module FindFirstFunctions
