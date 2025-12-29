@@ -91,9 +91,9 @@ using SafeTestsets, Test
         @test searchsortedfirstexp(vr, 2) == searchsortedfirst(vr, 2)
 
         # Large vector
-        vlarge = collect(1:10000)
+        big_v = collect(1:10000)
         for x in [1, 100, 1000, 5000, 9999, 10000]
-            @test searchsortedfirstexp(vlarge, x) == searchsortedfirst(vlarge, x)
+            @test searchsortedfirstexp(big_v, x) == searchsortedfirst(big_v, x)
         end
     end
 
