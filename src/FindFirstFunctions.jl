@@ -298,7 +298,7 @@ function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: Abst
     out
 end
 
-using PrecompileTools
+using PrecompileTools: @compile_workload, @setup_workload
 
 @setup_workload begin
     # Minimal setup for precompilation workload

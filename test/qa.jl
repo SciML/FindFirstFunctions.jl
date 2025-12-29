@@ -1,4 +1,4 @@
-using FindFirstFunctions, Aqua
+using FindFirstFunctions, Aqua, ExplicitImports
 @testset "Aqua" begin
     Aqua.find_persistent_tasks_deps(FindFirstFunctions)
     Aqua.test_ambiguities(FindFirstFunctions, recursive = false)
@@ -8,4 +8,9 @@ using FindFirstFunctions, Aqua
     Aqua.test_stale_deps(FindFirstFunctions)
     Aqua.test_unbound_args(FindFirstFunctions)
     Aqua.test_undefined_exports(FindFirstFunctions)
+end
+
+@testset "ExplicitImports" begin
+    @test check_no_implicit_imports(FindFirstFunctions) === nothing
+    @test check_no_stale_explicit_imports(FindFirstFunctions) === nothing
 end
