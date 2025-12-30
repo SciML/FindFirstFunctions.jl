@@ -297,7 +297,7 @@ function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: Abst
     guess.idx_prev[] = out
     out
 end
-
+    
 """
     searchsortedfirstexp(v, x, lo=firstindex(v), hi=lastindex(v))
 
@@ -395,8 +395,8 @@ function searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
     return out
 end
 
-using PrecompileTools
-
+using PrecompileTools: @compile_workload, @setup_workload
+    
 @setup_workload begin
     # Minimal setup for precompilation workload
     vec_int64 = Int64[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
