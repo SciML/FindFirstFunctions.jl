@@ -143,4 +143,8 @@ using SafeTestsets, Test
         @test searchsortedfirstvec(v, x_between) == searchsortedfirst.(Ref(v), x_between)
         @test searchsortedlastvec(v, x_between) == searchsortedlast.(Ref(v), x_between)
     end
+
+    if get(ENV, "GROUP", "all") == "all" || get(ENV, "GROUP", "all") == "nopre"
+        @safetestset "Allocation Tests" include("alloc_tests.jl")
+    end
 end
