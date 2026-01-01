@@ -20,6 +20,9 @@ FindFirstFunctions.looks_linear
 FindFirstFunctions.Guesser
 FindFirstFunctions.searchsortedfirstcorrelated
 FindFirstFunctions.searchsortedlastcorrelated
+FindFirstFunctions.searchsortedfirstexp
+FindFirstFunctions.searchsortedfirstvec
+FindFirstFunctions.searchsortedlastvec
 FindFirstFunctions.findfirstsortedequal
 ```
 

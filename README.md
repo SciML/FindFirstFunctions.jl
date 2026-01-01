@@ -13,7 +13,7 @@ over more generic implementations.
 findfirstequal(x::Int64,A::DenseVector{Int64})
 ```
 
-Finds the first value in `A` equal to `x`
+Finds the first index in `A` where the value equals `x`.
 
 ### `bracketstrictlymontonic`
 
@@ -36,7 +36,7 @@ purpose of using this function first would be to accelerate convergence in those
 by using correlated `guess`es for repeated calls.  The best `guess` for the next call of
 this function would be the index returned by the previous call to `searchsorted`.
 
-See `sort!` for an explanation of the keyword arguments `by`, `lt` and `rev`.
+See `Base.sort!` for an explanation of the keyword arguments `by`, `lt` and `rev`.
 
 ### `searchsortedfirstcorrelated(v::AbstractVector, x, guess)`
 
