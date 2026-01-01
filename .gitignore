@@ -1,2 +1,5 @@
 /Manifest.toml
 docs/build
+docs/Manifest.toml
+docs/src/assets/Manifest.toml
+docs/src/assets/Project.toml

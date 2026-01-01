@@ -77,7 +77,7 @@ end
 """
     findfirstequal(x::Int64,A::DenseVector{Int64})
 
-Finds the first value in `A` equal to `x`
+Finds the first index in `A` where the value equals `x`.
 """
 findfirstequal(vpivot, ivars) = findfirst(isequal(vpivot), ivars)
 function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
