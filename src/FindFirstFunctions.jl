@@ -3,68 +3,68 @@ module FindFirstFunctions
 # https://github.com/JuliaLang/julia/pull/53687
 const USE_PTR = VERSION >= v"1.12.0-DEV.255"
 const FFE_IR = """
-    declare i8 @llvm.cttz.i8(i8, i1);
-    define i64 @entry(i64 %0, $(USE_PTR ? "ptr" : "i64") %1, i64 %2) #0 {
-    top:
-      $(USE_PTR ? "" : "%ivars = inttoptr i64 %1 to i64*")
-      %btmp = insertelement <8 x i64> undef, i64 %0, i64 0
-      %var = shufflevector <8 x i64> %btmp, <8 x i64> undef, <8 x i32> zeroinitializer
-      %lenm7 = add nsw i64 %2, -7
-      %dosimditer = icmp ugt i64 %2, 7
-      br i1 %dosimditer, label %L9.lr.ph, label %L32
+declare i8 @llvm.cttz.i8(i8, i1);
+define i64 @entry(i64 %0, $(USE_PTR ? "ptr" : "i64") %1, i64 %2) #0 {
+top:
+  $(USE_PTR ? "" : "%ivars = inttoptr i64 %1 to i64*")
+  %btmp = insertelement <8 x i64> undef, i64 %0, i64 0
+  %var = shufflevector <8 x i64> %btmp, <8 x i64> undef, <8 x i32> zeroinitializer
+  %lenm7 = add nsw i64 %2, -7
+  %dosimditer = icmp ugt i64 %2, 7
+  br i1 %dosimditer, label %L9.lr.ph, label %L32
 
-    L9.lr.ph:
-      %len8 = and i64 %2, 9223372036854775800
-      br label %L9
+L9.lr.ph:
+  %len8 = and i64 %2, 9223372036854775800
+  br label %L9
 
-    L9:
-      %i = phi i64 [ 0, %L9.lr.ph ], [ %vinc, %L30 ]
-      %ivarsi = getelementptr inbounds i64, $(USE_PTR ? "ptr %1" : "i64* %ivars"), i64 %i
-      $(USE_PTR ? "" : "%vpvi = bitcast i64* %ivarsi to <8 x i64>*")
-      %v = load <8 x i64>, $(USE_PTR ? "ptr %ivarsi" : "<8 x i64> * %vpvi"), align 8
-      %m = icmp eq <8 x i64> %v, %var
-      %mu = bitcast <8 x i1> %m to i8
-      %matchnotfound = icmp eq i8 %mu, 0
-      br i1 %matchnotfound, label %L30, label %L17
+L9:
+  %i = phi i64 [ 0, %L9.lr.ph ], [ %vinc, %L30 ]
+  %ivarsi = getelementptr inbounds i64, $(USE_PTR ? "ptr %1" : "i64* %ivars"), i64 %i
+  $(USE_PTR ? "" : "%vpvi = bitcast i64* %ivarsi to <8 x i64>*")
+  %v = load <8 x i64>, $(USE_PTR ? "ptr %ivarsi" : "<8 x i64> * %vpvi"), align 8
+  %m = icmp eq <8 x i64> %v, %var
+  %mu = bitcast <8 x i1> %m to i8
+  %matchnotfound = icmp eq i8 %mu, 0
+  br i1 %matchnotfound, label %L30, label %L17
 
-    L17:
-      %tz8 = call i8 @llvm.cttz.i8(i8 %mu, i1 true)
-      %tz64 = zext i8 %tz8 to i64
-      %vis = add nuw i64 %i, %tz64
-      br label %common.ret
+L17:
+  %tz8 = call i8 @llvm.cttz.i8(i8 %mu, i1 true)
+  %tz64 = zext i8 %tz8 to i64
+  %vis = add nuw i64 %i, %tz64
+  br label %common.ret
 
-    common.ret:
-      %retval = phi i64 [ %vis, %L17 ], [ -1, %L32 ], [ %si, %L51 ], [ -1, %L67 ]
-      ret i64 %retval
+common.ret:
+  %retval = phi i64 [ %vis, %L17 ], [ -1, %L32 ], [ %si, %L51 ], [ -1, %L67 ]
+  ret i64 %retval
 
-    L30:
-      %vinc = add nuw nsw i64 %i, 8
-      %continue = icmp slt i64 %vinc, %lenm7
-      br i1 %continue, label %L9, label %L32
+L30:
+  %vinc = add nuw nsw i64 %i, 8
+  %continue = icmp slt i64 %vinc, %lenm7
+  br i1 %continue, label %L9, label %L32
 
-    L32:
-      %cumi = phi i64 [ 0, %top ], [ %len8, %L30 ]
-      %done = icmp eq i64 %cumi, %2
-      br i1 %done, label %common.ret, label %L51
+L32:
+  %cumi = phi i64 [ 0, %top ], [ %len8, %L30 ]
+  %done = icmp eq i64 %cumi, %2
+  br i1 %done, label %common.ret, label %L51
 
-    L51:
-      %si = phi i64 [ %inc, %L67 ], [ %cumi, %L32 ]
-      %spi = getelementptr inbounds i64, $(USE_PTR ? "ptr %1" : "i64* %ivars"), i64 %si
-      %svi = load i64, $(USE_PTR ? "ptr" : "i64*") %spi, align 8
-      %match = icmp eq i64 %svi, %0
-      br i1 %match, label %common.ret, label %L67
+L51:
+  %si = phi i64 [ %inc, %L67 ], [ %cumi, %L32 ]
+  %spi = getelementptr inbounds i64, $(USE_PTR ? "ptr %1" : "i64* %ivars"), i64 %si
+  %svi = load i64, $(USE_PTR ? "ptr" : "i64*") %spi, align 8
+  %match = icmp eq i64 %svi, %0
+  br i1 %match, label %common.ret, label %L67
 
-    L67:
-      %inc = add i64 %si, 1
-      %dobreak = icmp eq i64 %inc, %2
-      br i1 %dobreak, label %common.ret, label %L51
+L67:
+  %inc = add i64 %si, 1
+  %dobreak = icmp eq i64 %inc, %2
+  br i1 %dobreak, label %common.ret, label %L51
 
-    }
-    attributes #0 = { alwaysinline }
-    """
+}
+attributes #0 = { alwaysinline }
+"""
 
 function _findfirstequal(vpivot::Int64, ptr::Ptr{Int64}, len::Int64)
-    Base.llvmcall(
+    return Base.llvmcall(
         (FFE_IR, "entry"),
         Int64,
         Tuple{Int64, Ptr{Int64}, Int64},
@@ -84,7 +84,7 @@ function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
     GC.@preserve ivars begin
         ret = _findfirstequal(vpivot, pointer(ivars), length(ivars))
     end
-    ret < 0 ? nothing : ret + 1
+    return ret < 0 ? nothing : ret + 1
 end
 
 """
@@ -96,7 +96,7 @@ function findfirstsortedequal(
         var::Int64,
         vars::DenseVector{Int64},
         ::Val{basecase} = Base.libllvm_version >= v"17" ? Val(8) : Val(128)
-) where {basecase}
+    ) where {basecase}
     len = length(vars)
     offset = 0
     @inbounds while len > basecase
@@ -107,16 +107,16 @@ function findfirstsortedequal(
             offset = Base.llvmcall(
                 (
                     """
-                     define i64 @entry(i8 %0, i64 %1, i64 %2) #0 {
-                     top:
-                         %b = trunc i8 %0 to i1
-                         %s = select i1 %b, i64 %1, i64 %2, !unpredictable !0
-                         ret i64 %s
-                     }
-                     attributes #0 = { alwaysinline }
-                     !0 = !{}
-""",
-                    "entry"
+                                         define i64 @entry(i8 %0, i64 %1, i64 %2) #0 {
+                                         top:
+                                             %b = trunc i8 %0 to i1
+                                             %s = select i1 %b, i64 %1, i64 %2, !unpredictable !0
+                                             ret i64 %s
+                                         }
+                                         attributes #0 = { alwaysinline }
+                                         !0 = !{}
+                    """,
+                    "entry",
                 ),
                 Int64,
                 Tuple{Bool, Int64, Int64},
@@ -129,12 +129,12 @@ function findfirstsortedequal(
         end
         len = len - half
     end
-    # maybe occurs in vars[offset+1:offset+len] 
+    # maybe occurs in vars[offset+1:offset+len]
     GC.@preserve vars begin
         ret = _findfirstequal(var, pointer(vars) + 8offset, len)
     end
-    # return ret  
-    ret < 0 ? nothing : ret + offset + 1
+    # return ret
+    return ret < 0 ? nothing : ret + offset + 1
 end
 
 """
@@ -161,7 +161,7 @@ function bracketstrictlymontonic(
         x,
         guess::T,
         o::Base.Order.Ordering
-)::NTuple{2, keytype(v)} where {T <: Integer}
+    )::NTuple{2, keytype(v)} where {T <: Integer}
     bottom = firstindex(v)
     top = lastindex(v)
     if guess < bottom || guess > top
@@ -200,15 +200,15 @@ its first and last elements, normalized by the range of `v`. If this standard de
 below the given `threshold`, the vector looks linear (return true). Internal function -
 interface may change.
 """
-function looks_linear(v; threshold = 1e-2)
+function looks_linear(v; threshold = 1.0e-2)
     length(v) <= 2 && return true
     x_0, x_f = first(v), last(v)
     N = length(v)
     x_span = x_f - x_0
     mean_x_dist = x_span / (N - 1)
     norm_var = sum((x_i - x_0 - (i - 1) * mean_x_dist)^2 for (i, x_i) in enumerate(v)) /
-               (N * x_span^2)
-    norm_var < threshold^2
+        (N * x_span^2)
+    return norm_var < threshold^2
 end
 
 """
@@ -226,13 +226,13 @@ struct Guesser{T <: AbstractVector}
     linear_lookup::Bool
 end
 
-function Guesser(v::AbstractVector; looks_linear_threshold = 1e-2)
-    Guesser(v, Ref(1), looks_linear(v; threshold = looks_linear_threshold))
+function Guesser(v::AbstractVector; looks_linear_threshold = 1.0e-2)
+    return Guesser(v, Ref(1), looks_linear(v; threshold = looks_linear_threshold))
 end
 
 function (g::Guesser)(x)
     (; v, idx_prev, linear_lookup) = g
-    if linear_lookup
+    return if linear_lookup
         δx = x - first(v)
         iszero(δx) && return firstindex(v)
         f = δx / (last(v) - first(v))
@@ -263,7 +263,7 @@ to start the search from.
 """
 function searchsortedfirstcorrelated(v::AbstractVector, x, guess::T) where {T <: Integer}
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
-    searchsortedfirst(v, x, lo, hi, Base.Order.Forward)
+    return searchsortedfirst(v, x, lo, hi, Base.Order.Forward)
 end
 
 """
@@ -274,7 +274,7 @@ to start the search from.
 """
 function searchsortedlastcorrelated(v::AbstractVector, x, guess::T) where {T <: Integer}
     lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
-    searchsortedlast(v, x, lo, hi, Base.Order.Forward)
+    return searchsortedlast(v, x, lo, hi, Base.Order.Forward)
 end
 
 searchsortedfirstcorrelated(r::AbstractRange, x, ::Integer) = searchsortedfirst(r, x)
@@ -284,20 +284,20 @@ function searchsortedfirstcorrelated(
         v::AbstractVector,
         x,
         guess::Guesser{T}
-) where {T <: AbstractVector}
+    ) where {T <: AbstractVector}
     @assert v === guess.v
     out = searchsortedfirstcorrelated(v, x, guess(x))
     guess.idx_prev[] = out
-    out
+    return out
 end
 
 function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: AbstractVector}
     @assert v === guess.v
     out = searchsortedlastcorrelated(v, x, guess(x))
     guess.idx_prev[] = out
-    out
+    return out
 end
-    
+
 """
     searchsortedfirstexp(v, x, lo=firstindex(v), hi=lastindex(v))
 
@@ -312,7 +312,7 @@ Base.@propagate_inbounds function searchsortedfirstexp(
         x,
         lo::Integer = firstindex(v),
         hi::Integer = lastindex(v)
-)
+    )
     # Linear search for first few elements
     for i in 0:4
         ind = lo + i
@@ -396,7 +396,7 @@ function searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
 end
 
 using PrecompileTools: @compile_workload, @setup_workload
-    
+
 @setup_workload begin
     # Minimal setup for precompilation workload
     vec_int64 = Int64[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]

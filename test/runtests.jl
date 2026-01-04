@@ -16,9 +16,9 @@ using SafeTestsets, Test
             if length(x) > 0
                 @test FindFirstFunctions.findfirstequal(x[begin], @view(x[begin:end])) === 1
                 @test FindFirstFunctions.findfirstequal(x[begin], @view(x[(begin + 1):end])) ===
-                      nothing
+                    nothing
                 @test FindFirstFunctions.findfirstequal(x[end], @view(x[begin:(end - 1)])) ===
-                      nothing
+                    nothing
             end
             y = rand(Int)
             ff = findfirst(==(y), x)
@@ -30,8 +30,8 @@ using SafeTestsets, Test
 
     @safetestset "Guesser" begin
         using FindFirstFunctions:
-                                  Guesser, searchsortedfirstcorrelated,
-                                  searchsortedlastcorrelated
+            Guesser, searchsortedfirstcorrelated,
+            searchsortedlastcorrelated
         v = collect(LinRange(0, 10, 4))
         guesser_linear = Guesser(v)
         guesser_prev = Guesser(v, Ref(1), false)
