@@ -257,3 +257,4 @@ In "real world" workloads, your branch predictor isn't going to be able to memor
 Without making your benchmark realistic, the default setting of converting `cmov` into branches will look unrealistically good.
 
 If you actually are, memoize. If you're looking for close answers, look for something like `bracketstrictlymontonic`'s `guess` API.
+
