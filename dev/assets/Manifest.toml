@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.3"
+julia_version = "1.12.4"
 manifest_format = "2.0"
 project_hash = "d3bee4d259d8292d683cf0a930804b3efe69111a"
 
@@ -407,7 +407,7 @@ version = "1.15.0"
 deps = ["PrecompileTools"]
 path = "/home/runner/work/FindFirstFunctions.jl/FindFirstFunctions.jl"
 uuid = "64ca27bc-2ba2-4a57-88aa-44e436879224"
-version = "1.6.0"
+version = "1.7.0"
 
 [[deps.FiniteDiff]]
 deps = ["ArrayInterface", "LinearAlgebra", "Setfield"]
@@ -834,7 +834,7 @@ version = "1.11.0"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
-version = "2025.5.20"
+version = "2025.11.4"
 
 [[deps.NLSolversBase]]
 deps = ["ADTypes", "DifferentiationInterface", "Distributed", "FiniteDiff", "ForwardDiff"]
@@ -1186,9 +1186,9 @@ version = "0.4.2"
 
 [[deps.StructUtils]]
 deps = ["Dates", "UUIDs"]
-git-tree-sha1 = "79529b493a44927dd5b13dde1c7ce957c2d049e4"
+git-tree-sha1 = "b0290a55d9e047841d7f5c472edbdc39c72cd0ce"
 uuid = "ec057cc2-7a8d-4b58-b3b3-92acb9f63b42"
-version = "2.6.0"
+version = "2.6.1"
 
     [deps.StructUtils.extensions]
     StructUtilsMeasurementsExt = ["Measurements"]
