@@ -256,25 +256,39 @@ function (g::Guesser)(x)
 end
 
 """
-    searchsortedfirstcorrelated(v::AbstractVector, x, guess)
+    searchsortedfirstcorrelated(v::AbstractVector, x, guess; order=Base.Order.Forward)
 
 An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
 to start the search from.
+
+The `order` keyword argument specifies the ordering of the vector `v`, defaulting to `Base.Order.Forward`.
 """
-function searchsortedfirstcorrelated(v::AbstractVector, x, guess::T) where {T <: Integer}
-    lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
-    return searchsortedfirst(v, x, lo, hi, Base.Order.Forward)
+function searchsortedfirstcorrelated(
+        v::AbstractVector,
+        x,
+        guess::T;
+        order::Base.Order.Ordering = Base.Order.Forward
+    ) where {T <: Integer}
+    lo, hi = bracketstrictlymontonic(v, x, guess, order)
+    return searchsortedfirst(v, x, lo, hi, order)
 end
 
 """
-    searchsortedlastcorrelated(v::AbstractVector{T}, x, guess)
+    searchsortedlastcorrelated(v::AbstractVector{T}, x, guess; order=Base.Order.Forward)
 
 An accelerated `findlast` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
 to start the search from.
+
+The `order` keyword argument specifies the ordering of the vector `v`, defaulting to `Base.Order.Forward`.
 """
-function searchsortedlastcorrelated(v::AbstractVector, x, guess::T) where {T <: Integer}
-    lo, hi = bracketstrictlymontonic(v, x, guess, Base.Order.Forward)
-    return searchsortedlast(v, x, lo, hi, Base.Order.Forward)
+function searchsortedlastcorrelated(
+        v::AbstractVector,
+        x,
+        guess::T;
+        order::Base.Order.Ordering = Base.Order.Forward
+    ) where {T <: Integer}
+    lo, hi = bracketstrictlymontonic(v, x, guess, order)
+    return searchsortedlast(v, x, lo, hi, order)
 end
 
 searchsortedfirstcorrelated(r::AbstractRange, x, ::Integer) = searchsortedfirst(r, x)
@@ -283,17 +297,23 @@ searchsortedlastcorrelated(r::AbstractRange, x, ::Integer) = searchsortedlast(r,
 function searchsortedfirstcorrelated(
         v::AbstractVector,
         x,
-        guess::Guesser{T}
+        guess::Guesser{T};
+        order::Base.Order.Ordering = Base.Order.Forward
     ) where {T <: AbstractVector}
     @assert v === guess.v
-    out = searchsortedfirstcorrelated(v, x, guess(x))
+    out = searchsortedfirstcorrelated(v, x, guess(x); order = order)
     guess.idx_prev[] = out
     return out
 end
 
-function searchsortedlastcorrelated(v::T, x, guess::Guesser{T}) where {T <: AbstractVector}
+function searchsortedlastcorrelated(
+        v::T,
+        x,
+        guess::Guesser{T};
+        order::Base.Order.Ordering = Base.Order.Forward
+    ) where {T <: AbstractVector}
     @assert v === guess.v
-    out = searchsortedlastcorrelated(v, x, guess(x))
+    out = searchsortedlastcorrelated(v, x, guess(x); order = order)
     guess.idx_prev[] = out
     return out
 end

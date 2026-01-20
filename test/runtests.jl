@@ -56,6 +56,53 @@ using SafeTestsets, Test
         @test searchsortedlastcorrelated(v1, 42.0, guesser) == 1
     end
 
+    @safetestset "Custom ordering in searchsorted*correlated" begin
+        using FindFirstFunctions:
+            Guesser, searchsortedfirstcorrelated,
+            searchsortedlastcorrelated
+
+        # Test with reverse-sorted vector
+        v_rev = collect(10.0:-1.0:1.0)  # [10.0, 9.0, ..., 1.0]
+
+        # Test searchsortedfirstcorrelated with Reverse order
+        @test searchsortedfirstcorrelated(v_rev, 5.0, 1; order = Base.Order.Reverse) ==
+            searchsortedfirst(v_rev, 5.0, Base.Order.Reverse)
+        @test searchsortedfirstcorrelated(v_rev, 10.0, 1; order = Base.Order.Reverse) ==
+            searchsortedfirst(v_rev, 10.0, Base.Order.Reverse)
+        @test searchsortedfirstcorrelated(v_rev, 1.0, 1; order = Base.Order.Reverse) ==
+            searchsortedfirst(v_rev, 1.0, Base.Order.Reverse)
+        @test searchsortedfirstcorrelated(v_rev, 0.0, 1; order = Base.Order.Reverse) ==
+            searchsortedfirst(v_rev, 0.0, Base.Order.Reverse)
+        @test searchsortedfirstcorrelated(v_rev, 11.0, 1; order = Base.Order.Reverse) ==
+            searchsortedfirst(v_rev, 11.0, Base.Order.Reverse)
+
+        # Test searchsortedlastcorrelated with Reverse order
+        @test searchsortedlastcorrelated(v_rev, 5.0, 1; order = Base.Order.Reverse) ==
+            searchsortedlast(v_rev, 5.0, Base.Order.Reverse)
+        @test searchsortedlastcorrelated(v_rev, 10.0, 1; order = Base.Order.Reverse) ==
+            searchsortedlast(v_rev, 10.0, Base.Order.Reverse)
+        @test searchsortedlastcorrelated(v_rev, 1.0, 1; order = Base.Order.Reverse) ==
+            searchsortedlast(v_rev, 1.0, Base.Order.Reverse)
+        @test searchsortedlastcorrelated(v_rev, 0.0, 1; order = Base.Order.Reverse) ==
+            searchsortedlast(v_rev, 0.0, Base.Order.Reverse)
+        @test searchsortedlastcorrelated(v_rev, 11.0, 1; order = Base.Order.Reverse) ==
+            searchsortedlast(v_rev, 11.0, Base.Order.Reverse)
+
+        # Test with Guesser and reverse order
+        guesser_rev = Guesser(v_rev)
+        @test searchsortedfirstcorrelated(v_rev, 5.0, guesser_rev; order = Base.Order.Reverse) ==
+            searchsortedfirst(v_rev, 5.0, Base.Order.Reverse)
+        @test searchsortedlastcorrelated(v_rev, 5.0, guesser_rev; order = Base.Order.Reverse) ==
+            searchsortedlast(v_rev, 5.0, Base.Order.Reverse)
+
+        # Test that default order (Forward) still works correctly
+        v_fwd = collect(1.0:1.0:10.0)  # [1.0, 2.0, ..., 10.0]
+        @test searchsortedfirstcorrelated(v_fwd, 5.0, 1) ==
+            searchsortedfirst(v_fwd, 5.0)
+        @test searchsortedlastcorrelated(v_fwd, 5.0, 1) ==
+            searchsortedlast(v_fwd, 5.0)
+    end
+
     @safetestset "Exponential Search (searchsortedfirstexp)" begin
         using FindFirstFunctions: searchsortedfirstexp
 
