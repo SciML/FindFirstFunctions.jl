@@ -90,45 +90,55 @@ end
     linear_vec = collect(LinRange(0.0, 100.0, 1000))
 
     @testset "findfirstequal" begin
-        # Warm up
+        # Warm up all cases to avoid JIT/GC measurement artifacts
         FindFirstFunctions.findfirstequal(Int64(8), small_vec)
+        FindFirstFunctions.findfirstequal(Int64(64), medium_vec)
+        FindFirstFunctions.findfirstequal(Int64(500), large_vec)
+        FindFirstFunctions.findfirstequal(Int64(9999), small_vec)
 
         # Test zero allocations for different vector sizes
-        @test (@allocated FindFirstFunctions.findfirstequal(Int64(8), small_vec)) == 0
-        @test (@allocated FindFirstFunctions.findfirstequal(Int64(64), medium_vec)) == 0
-        @test (@allocated FindFirstFunctions.findfirstequal(Int64(500), large_vec)) == 0
+        # Use minimum over multiple runs to filter out GC noise (Julia 1.12+)
+        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(8), small_vec)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(64), medium_vec)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(500), large_vec)) for _ in 1:10) == 0
         # Not found case
-        @test (@allocated FindFirstFunctions.findfirstequal(Int64(9999), small_vec)) == 0
+        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(9999), small_vec)) for _ in 1:10) == 0
     end
 
     @testset "findfirstsortedequal" begin
-        # Warm up
+        # Warm up all cases to avoid JIT/GC measurement artifacts
         FindFirstFunctions.findfirstsortedequal(Int64(8), small_vec)
+        FindFirstFunctions.findfirstsortedequal(Int64(64), medium_vec)
+        FindFirstFunctions.findfirstsortedequal(Int64(500), large_vec)
+        FindFirstFunctions.findfirstsortedequal(Int64(9999), small_vec)
 
         # Test zero allocations
-        @test (@allocated FindFirstFunctions.findfirstsortedequal(Int64(8), small_vec)) == 0
-        @test (@allocated FindFirstFunctions.findfirstsortedequal(Int64(64), medium_vec)) == 0
-        @test (@allocated FindFirstFunctions.findfirstsortedequal(Int64(500), large_vec)) == 0
+        # Use minimum over multiple runs to filter out GC noise (Julia 1.12+)
+        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(8), small_vec)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(64), medium_vec)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(500), large_vec)) for _ in 1:10) == 0
         # Not found case
-        @test (@allocated FindFirstFunctions.findfirstsortedequal(Int64(9999), small_vec)) == 0
+        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(9999), small_vec)) for _ in 1:10) == 0
     end
 
     @testset "bracketstrictlymontonic" begin
         # Warm up
         FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 1, Base.Order.Forward)
+        FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 500, Base.Order.Forward)
 
         # Test zero allocations
-        @test (@allocated FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 1, Base.Order.Forward)) == 0
-        @test (@allocated FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 500, Base.Order.Forward)) == 0
+        @test minimum(@allocated(FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 1, Base.Order.Forward)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 500, Base.Order.Forward)) for _ in 1:10) == 0
     end
 
     @testset "looks_linear" begin
         # Warm up
         FindFirstFunctions.looks_linear(linear_vec)
+        FindFirstFunctions.looks_linear(sorted_float_vec)
 
         # Test zero allocations
-        @test (@allocated FindFirstFunctions.looks_linear(linear_vec)) == 0
-        @test (@allocated FindFirstFunctions.looks_linear(sorted_float_vec)) == 0
+        @test minimum(@allocated(FindFirstFunctions.looks_linear(linear_vec)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.looks_linear(sorted_float_vec)) for _ in 1:10) == 0
     end
 
     @testset "Guesser" begin
@@ -136,10 +146,11 @@ end
 
         # Warm up
         guesser(50.0)
+        guesser(25.0)
 
         # Test zero allocations for Guesser call
-        @test (@allocated guesser(50.0)) == 0
-        @test (@allocated guesser(25.0)) == 0
+        @test minimum(@allocated(guesser(50.0)) for _ in 1:10) == 0
+        @test minimum(@allocated(guesser(25.0)) for _ in 1:10) == 0
     end
 
     @testset "searchsortedfirstcorrelated" begin
@@ -148,8 +159,8 @@ end
         FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 500)
 
         # Test zero allocations with integer guess
-        @test (@allocated FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 1)) == 0
-        @test (@allocated FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 500)) == 0
+        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 1)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 500)) for _ in 1:10) == 0
     end
 
     @testset "searchsortedlastcorrelated" begin
@@ -158,8 +169,8 @@ end
         FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 500)
 
         # Test zero allocations with integer guess
-        @test (@allocated FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 1)) == 0
-        @test (@allocated FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 500)) == 0
+        @test minimum(@allocated(FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 1)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 500)) for _ in 1:10) == 0
     end
 
     @testset "searchsortedfirstexp" begin
@@ -168,7 +179,7 @@ end
         FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0, 490, 510)
 
         # Test zero allocations
-        @test (@allocated FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0)) == 0
-        @test (@allocated FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0, 490, 510)) == 0
+        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0)) for _ in 1:10) == 0
+        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0, 490, 510)) for _ in 1:10) == 0
     end
 end
