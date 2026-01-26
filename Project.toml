@@ -1,6 +1,6 @@
 name = "FindFirstFunctions"
 uuid = "64ca27bc-2ba2-4a57-88aa-44e436879224"
-version = "1.7.0"
+version = "1.8.0"
 authors = ["Chris Elrod <elrodc@gmail.com> and contributors"]
 
 [deps]
