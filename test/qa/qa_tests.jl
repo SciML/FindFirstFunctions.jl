@@ -81,105 +81,105 @@ end
     @test length(JET.get_reports(rep)) == 0
 end
 
-@testset "AllocCheck - Zero Allocations" begin
-    # Test data
-    small_vec = Int64.(1:16)
-    medium_vec = Int64.(1:128)
-    large_vec = Int64.(1:1000)
-    sorted_float_vec = collect(1.0:0.1:100.0)
-    linear_vec = collect(LinRange(0.0, 100.0, 1000))
+@testset "AllocCheck - Static Allocation Analysis" begin
+    # Use AllocCheck's static analysis (check_allocs) instead of runtime @allocated.
+    # This is more robust as it analyzes LLVM IR for allocation sites rather than
+    # measuring runtime allocations which can be noisy due to GC artifacts.
 
     @testset "findfirstequal" begin
-        # Warm up all cases to avoid JIT/GC measurement artifacts
-        FindFirstFunctions.findfirstequal(Int64(8), small_vec)
-        FindFirstFunctions.findfirstequal(Int64(64), medium_vec)
-        FindFirstFunctions.findfirstequal(Int64(500), large_vec)
-        FindFirstFunctions.findfirstequal(Int64(9999), small_vec)
-
-        # Test zero allocations for different vector sizes
-        # Use minimum over multiple runs to filter out GC noise (Julia 1.12+)
-        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(8), small_vec)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(64), medium_vec)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(500), large_vec)) for _ in 1:10) == 0
-        # Not found case
-        @test minimum(@allocated(FindFirstFunctions.findfirstequal(Int64(9999), small_vec)) for _ in 1:10) == 0
+        # Int64 vector (SIMD path)
+        allocs = check_allocs(FindFirstFunctions.findfirstequal, (Int64, Vector{Int64}))
+        @test isempty(allocs)
     end
 
     @testset "findfirstsortedequal" begin
-        # Warm up all cases to avoid JIT/GC measurement artifacts
-        FindFirstFunctions.findfirstsortedequal(Int64(8), small_vec)
-        FindFirstFunctions.findfirstsortedequal(Int64(64), medium_vec)
-        FindFirstFunctions.findfirstsortedequal(Int64(500), large_vec)
-        FindFirstFunctions.findfirstsortedequal(Int64(9999), small_vec)
-
-        # Test zero allocations
-        # Use minimum over multiple runs to filter out GC noise (Julia 1.12+)
-        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(8), small_vec)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(64), medium_vec)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(500), large_vec)) for _ in 1:10) == 0
-        # Not found case
-        @test minimum(@allocated(FindFirstFunctions.findfirstsortedequal(Int64(9999), small_vec)) for _ in 1:10) == 0
+        # Int64 vector (binary search + SIMD)
+        allocs = check_allocs(FindFirstFunctions.findfirstsortedequal, (Int64, Vector{Int64}))
+        @test isempty(allocs)
     end
 
     @testset "bracketstrictlymontonic" begin
-        # Warm up
-        FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 1, Base.Order.Forward)
-        FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 500, Base.Order.Forward)
+        # Int64 vector with Forward ordering
+        allocs = check_allocs(
+            FindFirstFunctions.bracketstrictlymontonic,
+            (Vector{Int64}, Int64, Int64, Base.Order.ForwardOrdering)
+        )
+        @test isempty(allocs)
 
-        # Test zero allocations
-        @test minimum(@allocated(FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 1, Base.Order.Forward)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.bracketstrictlymontonic(linear_vec, 50.0, 500, Base.Order.Forward)) for _ in 1:10) == 0
+        # Float64 vector with Forward ordering
+        allocs = check_allocs(
+            FindFirstFunctions.bracketstrictlymontonic,
+            (Vector{Float64}, Float64, Int64, Base.Order.ForwardOrdering)
+        )
+        @test isempty(allocs)
     end
 
     @testset "looks_linear" begin
-        # Warm up
-        FindFirstFunctions.looks_linear(linear_vec)
-        FindFirstFunctions.looks_linear(sorted_float_vec)
+        # Float64 vector
+        allocs = check_allocs(FindFirstFunctions.looks_linear, (Vector{Float64},))
+        @test isempty(allocs)
 
-        # Test zero allocations
-        @test minimum(@allocated(FindFirstFunctions.looks_linear(linear_vec)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.looks_linear(sorted_float_vec)) for _ in 1:10) == 0
+        # Int64 vector
+        allocs = check_allocs(FindFirstFunctions.looks_linear, (Vector{Int64},))
+        @test isempty(allocs)
     end
 
-    @testset "Guesser" begin
-        guesser = FindFirstFunctions.Guesser(linear_vec)
-
-        # Warm up
-        guesser(50.0)
-        guesser(25.0)
-
-        # Test zero allocations for Guesser call
-        @test minimum(@allocated(guesser(50.0)) for _ in 1:10) == 0
-        @test minimum(@allocated(guesser(25.0)) for _ in 1:10) == 0
+    @testset "Guesser callable" begin
+        # Test the Guesser callable with Float64 input
+        # Note: We test a concrete Guesser type, not the constructor
+        GuesserType = FindFirstFunctions.Guesser{Vector{Float64}}
+        allocs = check_allocs(
+            (g, x) -> g(x),
+            (GuesserType, Float64)
+        )
+        @test isempty(allocs)
     end
 
     @testset "searchsortedfirstcorrelated" begin
-        # Warm up
-        FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 1)
-        FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 500)
+        # Int64 vector with integer guess
+        allocs = check_allocs(
+            FindFirstFunctions.searchsortedfirstcorrelated,
+            (Vector{Int64}, Int64, Int64)
+        )
+        @test isempty(allocs)
 
-        # Test zero allocations with integer guess
-        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 1)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstcorrelated(linear_vec, 50.0, 500)) for _ in 1:10) == 0
+        # Float64 vector with integer guess
+        allocs = check_allocs(
+            FindFirstFunctions.searchsortedfirstcorrelated,
+            (Vector{Float64}, Float64, Int64)
+        )
+        @test isempty(allocs)
     end
 
     @testset "searchsortedlastcorrelated" begin
-        # Warm up
-        FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 1)
-        FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 500)
+        # Int64 vector with integer guess
+        allocs = check_allocs(
+            FindFirstFunctions.searchsortedlastcorrelated,
+            (Vector{Int64}, Int64, Int64)
+        )
+        @test isempty(allocs)
 
-        # Test zero allocations with integer guess
-        @test minimum(@allocated(FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 1)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.searchsortedlastcorrelated(linear_vec, 50.0, 500)) for _ in 1:10) == 0
+        # Float64 vector with integer guess
+        allocs = check_allocs(
+            FindFirstFunctions.searchsortedlastcorrelated,
+            (Vector{Float64}, Float64, Int64)
+        )
+        @test isempty(allocs)
     end
 
     @testset "searchsortedfirstexp" begin
-        # Warm up
-        FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0)
-        FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0, 490, 510)
+        # Int64 vector
+        allocs = check_allocs(
+            FindFirstFunctions.searchsortedfirstexp,
+            (Vector{Int64}, Int64, Int64, Int64)
+        )
+        @test isempty(allocs)
 
-        # Test zero allocations
-        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0)) for _ in 1:10) == 0
-        @test minimum(@allocated(FindFirstFunctions.searchsortedfirstexp(linear_vec, 50.0, 490, 510)) for _ in 1:10) == 0
+        # Float64 vector
+        allocs = check_allocs(
+            FindFirstFunctions.searchsortedfirstexp,
+            (Vector{Float64}, Float64, Int64, Int64)
+        )
+        @test isempty(allocs)
     end
 end
