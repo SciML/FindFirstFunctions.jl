@@ -191,6 +191,332 @@ function bracketstrictlymontonic(
     return lo, hi
 end
 
+# ---------------------------------------------------------------------------
+# Sorted-search strategies
+# ---------------------------------------------------------------------------
+
+"""
+    SearchStrategy
+
+Abstract supertype for sorted-search strategies. Concrete subtypes select how
+[`searchsortedlast`](@ref Base.searchsortedlast) and
+[`searchsortedfirst`](@ref Base.searchsortedfirst) should be performed when
+called with a strategy as the first positional argument:
+
+  - [`LinearScan`](@ref) walks ±1 from the hint until the answer is bracketed.
+    Cheapest when the target is within a few positions of the hint; degrades
+    linearly otherwise.
+  - [`BracketGallop`](@ref) expands an exponential bracket from the hint, then
+    binary-searches inside it. Effectively O(1) when the target is near the
+    hint; never worse than ~2 log₂ n comparisons. This is the strategy used
+    by the legacy [`searchsortedfirstcorrelated`](@ref) / [`searchsortedlastcorrelated`](@ref).
+  - [`BinaryBracket`](@ref) is the standard `Base.searchsortedlast` /
+    `Base.searchsortedfirst` with no hint. Use it when no useful hint exists.
+  - [`Auto`](@ref) heuristically picks one of the above based on the size of
+    `v` and whether a hint was supplied.
+
+Strategies can also be passed to the batched
+[`searchsortedlast!`](@ref) / [`searchsortedfirst!`](@ref) APIs.
+"""
+abstract type SearchStrategy end
+
+"""
+    LinearScan <: SearchStrategy
+
+Walk ±1 from the hint. Best when the target is within a few positions of the
+hint. Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
+"""
+struct LinearScan <: SearchStrategy end
+
+"""
+    BracketGallop <: SearchStrategy
+
+Expand an exponential bracket from the hint using
+[`bracketstrictlymontonic`](@ref), then binary-search inside the bracket. The
+default strategy backing [`searchsortedfirstcorrelated`](@ref) and
+[`searchsortedlastcorrelated`](@ref). Falls back to [`BinaryBracket`](@ref)
+when no hint is supplied.
+"""
+struct BracketGallop <: SearchStrategy end
+
+"""
+    BinaryBracket <: SearchStrategy
+
+Plain `Base.searchsortedlast` / `Base.searchsortedfirst`. Ignores any hint
+that is supplied.
+"""
+struct BinaryBracket <: SearchStrategy end
+
+"""
+    Auto <: SearchStrategy
+
+Heuristically picks among [`LinearScan`](@ref), [`BracketGallop`](@ref), and
+[`BinaryBracket`](@ref):
+
+  - No hint, or hint outside `axes(v)` → [`BinaryBracket`](@ref).
+  - Hint in range and `length(v) ≤ 32` → [`LinearScan`](@ref) (binary-search
+    setup overhead exceeds the worst-case linear walk on tiny vectors).
+  - Hint in range and `length(v) > 32` → [`BracketGallop`](@ref).
+"""
+struct Auto <: SearchStrategy end
+
+const _AUTO_LINEAR_THRESHOLD = 32
+
+# Strategy: BinaryBracket — ignore any hint.
+Base.searchsortedlast(
+    ::BinaryBracket, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(v, x, order)
+Base.searchsortedfirst(
+    ::BinaryBracket, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(v, x, order)
+Base.searchsortedlast(
+    s::BinaryBracket, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(s, v, x; order = order)
+Base.searchsortedfirst(
+    s::BinaryBracket, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(s, v, x; order = order)
+
+# Strategy: LinearScan — walk ±1 from the hint until the answer is bracketed.
+function Base.searchsortedlast(
+        ::LinearScan, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    if hi < lo
+        return lo - 1   # empty vector
+    end
+    i = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, x, v[i])
+        # v[i] > x → retreat
+        while i > lo
+            i -= 1
+            !Base.Order.lt(order, x, v[i]) && return i
+        end
+        return lo - 1   # x precedes all of v
+    else
+        # v[i] ≤ x → try to advance
+        while i < hi
+            Base.Order.lt(order, x, v[i + 1]) && return i
+            i += 1
+        end
+        return hi
+    end
+end
+
+function Base.searchsortedfirst(
+        ::LinearScan, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    if hi < lo
+        return lo
+    end
+    i = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, v[i], x)
+        # v[i] < x → advance
+        while i < hi
+            i += 1
+            !Base.Order.lt(order, v[i], x) && return i
+        end
+        return hi + 1   # x exceeds all of v
+    else
+        # v[i] ≥ x → try to retreat
+        while i > lo
+            !Base.Order.lt(order, v[i - 1], x) && (i -= 1; continue)
+            return i
+        end
+        return lo
+    end
+end
+
+# LinearScan without a hint falls back to BinaryBracket.
+Base.searchsortedlast(
+    s::LinearScan, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    s::LinearScan, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Strategy: BracketGallop — bracketstrictlymontonic + bounded binary search.
+function Base.searchsortedlast(
+        ::BracketGallop, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    lo, hi = bracketstrictlymontonic(v, x, hint, order)
+    return searchsortedlast(v, x, lo, hi, order)
+end
+
+function Base.searchsortedfirst(
+        ::BracketGallop, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    lo, hi = bracketstrictlymontonic(v, x, hint, order)
+    return searchsortedfirst(v, x, lo, hi, order)
+end
+
+# BracketGallop without a hint falls back to BinaryBracket.
+Base.searchsortedlast(
+    ::BracketGallop, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::BracketGallop, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Strategy: Auto — pick based on hint validity and length(v).
+@inline function _auto_pick(v::AbstractVector, hint::Integer)
+    return if hint < firstindex(v) || hint > lastindex(v)
+        BinaryBracket()
+    elseif length(v) <= _AUTO_LINEAR_THRESHOLD
+        LinearScan()
+    else
+        BracketGallop()
+    end
+end
+
+function Base.searchsortedlast(
+        ::Auto, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    s = _auto_pick(v, hint)
+    return s isa BinaryBracket ?
+        searchsortedlast(s, v, x; order = order) :
+        searchsortedlast(s, v, x, hint; order = order)
+end
+
+function Base.searchsortedfirst(
+        ::Auto, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    s = _auto_pick(v, hint)
+    return s isa BinaryBracket ?
+        searchsortedfirst(s, v, x; order = order) :
+        searchsortedfirst(s, v, x, hint; order = order)
+end
+
+Base.searchsortedlast(
+    ::Auto, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::Auto, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# ---------------------------------------------------------------------------
+# In-place batched sorted-search API
+# ---------------------------------------------------------------------------
+
+"""
+    searchsortedlast!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward)
+
+In-place batched [`searchsortedlast`](@ref Base.searchsortedlast). Writes one
+index per element of `queries` into `idx_out` (which must be the same length).
+
+If `queries` is sorted under `order`, the previous result is used as a hint for
+the next query, so the total cost is O(length(v) + length(queries)) under
+`strategy = BracketGallop()` (the default `Auto` choice for non-tiny `v`),
+matching what callers used to hand-roll with `searchsortedlastcorrelated` +
+a manually-maintained `idx` variable.
+
+If `queries` is not sorted, falls back to per-element `searchsortedlast` with
+no hint regardless of `strategy`.
+
+Returns `idx_out`.
+"""
+function searchsortedlast!(
+        idx_out::AbstractVector{<:Integer},
+        v::AbstractVector,
+        queries::AbstractVector;
+        strategy::SearchStrategy = Auto(),
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if length(idx_out) != length(queries)
+        throw(
+            DimensionMismatch(
+                "idx_out and queries must have the same length"
+            )
+        )
+    end
+    return _searchsortedlast_batched!(idx_out, v, queries, strategy, order)
+end
+
+"""
+    searchsortedfirst!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward)
+
+In-place batched [`searchsortedfirst`](@ref Base.searchsortedfirst). See
+[`searchsortedlast!`](@ref) for behavior.
+"""
+function searchsortedfirst!(
+        idx_out::AbstractVector{<:Integer},
+        v::AbstractVector,
+        queries::AbstractVector;
+        strategy::SearchStrategy = Auto(),
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if length(idx_out) != length(queries)
+        throw(
+            DimensionMismatch(
+                "idx_out and queries must have the same length"
+            )
+        )
+    end
+    return _searchsortedfirst_batched!(idx_out, v, queries, strategy, order)
+end
+
+function _searchsortedlast_batched!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        strategy::SearchStrategy, order::Base.Order.Ordering
+    )
+    if issorted(queries; order = order)
+        hint = firstindex(v) - 1
+        @inbounds for k in eachindex(queries)
+            q = queries[k]
+            hint = if hint < firstindex(v)
+                searchsortedlast(strategy, v, q; order = order)
+            else
+                searchsortedlast(strategy, v, q, hint; order = order)
+            end
+            idx_out[k] = hint
+        end
+    else
+        @inbounds for k in eachindex(queries)
+            idx_out[k] = searchsortedlast(v, queries[k], order)
+        end
+    end
+    return idx_out
+end
+
+function _searchsortedfirst_batched!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        strategy::SearchStrategy, order::Base.Order.Ordering
+    )
+    if issorted(queries; order = order)
+        hint = firstindex(v) - 1
+        @inbounds for k in eachindex(queries)
+            q = queries[k]
+            hint = if hint < firstindex(v)
+                searchsortedfirst(strategy, v, q; order = order)
+            else
+                searchsortedfirst(strategy, v, q, hint; order = order)
+            end
+            idx_out[k] = hint
+        end
+    else
+        @inbounds for k in eachindex(queries)
+            idx_out[k] = searchsortedfirst(v, queries[k], order)
+        end
+    end
+    return idx_out
+end
+
 """
     looks_linear(v; threshold = 1e-2)
 
@@ -262,6 +588,8 @@ An accelerated `findfirst` on sorted vectors using a bracketed search. Requires 
 to start the search from.
 
 The `order` keyword argument specifies the ordering of the vector `v`, defaulting to `Base.Order.Forward`.
+
+Equivalent to `searchsortedfirst(BracketGallop(), v, x, guess; order = order)`.
 """
 function searchsortedfirstcorrelated(
         v::AbstractVector,
@@ -269,8 +597,7 @@ function searchsortedfirstcorrelated(
         guess::T;
         order::Base.Order.Ordering = Base.Order.Forward
     ) where {T <: Integer}
-    lo, hi = bracketstrictlymontonic(v, x, guess, order)
-    return searchsortedfirst(v, x, lo, hi, order)
+    return searchsortedfirst(BracketGallop(), v, x, guess; order = order)
 end
 
 """
@@ -280,6 +607,8 @@ An accelerated `findlast` on sorted vectors using a bracketed search. Requires a
 to start the search from.
 
 The `order` keyword argument specifies the ordering of the vector `v`, defaulting to `Base.Order.Forward`.
+
+Equivalent to `searchsortedlast(BracketGallop(), v, x, guess; order = order)`.
 """
 function searchsortedlastcorrelated(
         v::AbstractVector,
@@ -287,8 +616,7 @@ function searchsortedlastcorrelated(
         guess::T;
         order::Base.Order.Ordering = Base.Order.Forward
     ) where {T <: Integer}
-    lo, hi = bracketstrictlymontonic(v, x, guess, order)
-    return searchsortedlast(v, x, lo, hi, order)
+    return searchsortedlast(BracketGallop(), v, x, guess; order = order)
 end
 
 searchsortedfirstcorrelated(r::AbstractRange, x, ::Integer) = searchsortedfirst(r, x)
@@ -363,31 +691,12 @@ Returns indices such that `v[out[i]] <= x[i]` (like `searchsortedlast`).
 
 If `x` is not sorted, falls back to element-wise `searchsortedlast`.
 
-Inspired by Interpolations.jl's `searchsortedfirst_vec`.
+Allocating wrapper around [`searchsortedlast!`](@ref) with the default `Auto`
+strategy. Inspired by Interpolations.jl's `searchsortedfirst_vec`.
 """
 function searchsortedlastvec(v::AbstractVector, x::AbstractVector)
-    issorted(x) || return searchsortedlast.(Ref(v), x)
     out = Vector{Int}(undef, length(x))
-    lo = firstindex(v)
-    hi = lastindex(v)
-    @inbounds for i in eachindex(x)
-        xx = x[i]
-        y = searchsortedfirstexp(v, xx, lo, hi)
-        # searchsortedfirstexp returns index of first element >= x
-        # searchsortedlast returns index of last element <= x
-        # If y > hi, x is larger than all elements, return hi
-        # If v[y] == x, return y (first >= is also <=)
-        # If v[y] > x, return y - 1
-        if y > hi
-            out[i] = hi
-        elseif v[y] == xx
-            out[i] = y
-        else
-            out[i] = y - 1
-        end
-        lo = max(y, lo)
-    end
-    return out
+    return searchsortedlast!(out, v, x)
 end
 
 """
@@ -399,20 +708,12 @@ Returns indices such that `v[out[i]] >= x[i]` (like `searchsortedfirst`).
 
 If `x` is not sorted, falls back to element-wise `searchsortedfirst`.
 
-Inspired by Interpolations.jl's `searchsortedfirst_vec`.
+Allocating wrapper around [`searchsortedfirst!`](@ref) with the default `Auto`
+strategy. Inspired by Interpolations.jl's `searchsortedfirst_vec`.
 """
 function searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
-    issorted(x) || return searchsortedfirst.(Ref(v), x)
     out = Vector{Int}(undef, length(x))
-    lo = firstindex(v)
-    hi = lastindex(v)
-    @inbounds for i in eachindex(x)
-        xx = x[i]
-        y = searchsortedfirstexp(v, xx, lo, hi)
-        out[i] = y
-        lo = min(y, hi)
-    end
-    return out
+    return searchsortedfirst!(out, v, x)
 end
 
 using PrecompileTools: @compile_workload, @setup_workload

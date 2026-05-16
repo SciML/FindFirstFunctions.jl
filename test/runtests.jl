@@ -198,6 +198,165 @@ end
             @test searchsortedfirstvec(v, x_between) == searchsortedfirst.(Ref(v), x_between)
             @test searchsortedlastvec(v, x_between) == searchsortedlast.(Ref(v), x_between)
         end
+
+        @safetestset "SearchStrategy dispatch (single query)" begin
+            using FindFirstFunctions:
+                SearchStrategy, LinearScan, BracketGallop, BinaryBracket, Auto
+
+            for n in (0, 1, 2, 8, 33, 257)
+                v = collect(1:n)
+                isempty(v) && continue
+
+                # Probe targets that include hits, misses, boundaries
+                xs = unique!(sort!([0, 1, n ÷ 2, n, n + 1, -3, 2 * n + 1]))
+                for x in xs
+                    expected_last = searchsortedlast(v, x)
+                    expected_first = searchsortedfirst(v, x)
+
+                    # BinaryBracket — ignores any hint
+                    @test searchsortedlast(BinaryBracket(), v, x) == expected_last
+                    @test searchsortedfirst(BinaryBracket(), v, x) == expected_first
+                    @test searchsortedlast(BinaryBracket(), v, x, 1) == expected_last
+                    @test searchsortedfirst(BinaryBracket(), v, x, 1) == expected_first
+
+                    # Strategy with hint anywhere in 1..n agrees with Base
+                    for h in unique!([1, max(1, n ÷ 4), n ÷ 2, max(1, 3n ÷ 4), n])
+                        @test searchsortedlast(LinearScan(), v, x, h) == expected_last
+                        @test searchsortedfirst(LinearScan(), v, x, h) == expected_first
+                        @test searchsortedlast(BracketGallop(), v, x, h) == expected_last
+                        @test searchsortedfirst(BracketGallop(), v, x, h) == expected_first
+                        @test searchsortedlast(Auto(), v, x, h) == expected_last
+                        @test searchsortedfirst(Auto(), v, x, h) == expected_first
+                    end
+
+                    # No-hint forms fall back to BinaryBracket
+                    @test searchsortedlast(LinearScan(), v, x) == expected_last
+                    @test searchsortedfirst(LinearScan(), v, x) == expected_first
+                    @test searchsortedlast(BracketGallop(), v, x) == expected_last
+                    @test searchsortedfirst(BracketGallop(), v, x) == expected_first
+                    @test searchsortedlast(Auto(), v, x) == expected_last
+                    @test searchsortedfirst(Auto(), v, x) == expected_first
+
+                    # Out-of-range hint → Auto falls back to BinaryBracket
+                    @test searchsortedlast(Auto(), v, x, 0) == expected_last
+                    @test searchsortedfirst(Auto(), v, x, 0) == expected_first
+                    @test searchsortedlast(Auto(), v, x, n + 1) == expected_last
+                    @test searchsortedfirst(Auto(), v, x, n + 1) == expected_first
+                end
+            end
+
+            # Reverse order
+            v_rev = collect(10.0:-1.0:1.0)
+            for x in (0.5, 1.0, 5.0, 10.0, 11.0), h in (1, 5, 10)
+                @test searchsortedlast(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
+                    searchsortedlast(v_rev, x, Base.Order.Reverse)
+                @test searchsortedfirst(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
+                    searchsortedfirst(v_rev, x, Base.Order.Reverse)
+                @test searchsortedlast(LinearScan(), v_rev, x, h; order = Base.Order.Reverse) ==
+                    searchsortedlast(v_rev, x, Base.Order.Reverse)
+                @test searchsortedfirst(LinearScan(), v_rev, x, h; order = Base.Order.Reverse) ==
+                    searchsortedfirst(v_rev, x, Base.Order.Reverse)
+                @test searchsortedlast(Auto(), v_rev, x, h; order = Base.Order.Reverse) ==
+                    searchsortedlast(v_rev, x, Base.Order.Reverse)
+                @test searchsortedfirst(Auto(), v_rev, x, h; order = Base.Order.Reverse) ==
+                    searchsortedfirst(v_rev, x, Base.Order.Reverse)
+            end
+
+            # Strategy abstract type hierarchy
+            @test LinearScan <: SearchStrategy
+            @test BracketGallop <: SearchStrategy
+            @test BinaryBracket <: SearchStrategy
+            @test Auto <: SearchStrategy
+        end
+
+        @safetestset "Batched in-place searchsorted!" begin
+            using FindFirstFunctions:
+                LinearScan, BracketGallop, BinaryBracket, Auto,
+                searchsortedlast!, searchsortedfirst!,
+                searchsortedlastvec, searchsortedfirstvec
+
+            # Sorted queries
+            v = collect(1:100)
+            x_sorted = [5, 10, 20, 50, 90]
+            out_last = Vector{Int}(undef, length(x_sorted))
+            out_first = Vector{Int}(undef, length(x_sorted))
+
+            @test searchsortedlast!(out_last, v, x_sorted) ==
+                searchsortedlast.(Ref(v), x_sorted)
+            @test searchsortedfirst!(out_first, v, x_sorted) ==
+                searchsortedfirst.(Ref(v), x_sorted)
+            @test out_last === searchsortedlast!(out_last, v, x_sorted)  # in-place
+
+            # Each strategy gives the same result on sorted input
+            for strategy in
+                (LinearScan(), BracketGallop(), BinaryBracket(), Auto())
+                fill!(out_last, 0)
+                fill!(out_first, 0)
+                searchsortedlast!(out_last, v, x_sorted; strategy = strategy)
+                searchsortedfirst!(out_first, v, x_sorted; strategy = strategy)
+                @test out_last == searchsortedlast.(Ref(v), x_sorted)
+                @test out_first == searchsortedfirst.(Ref(v), x_sorted)
+            end
+
+            # Unsorted falls back to per-element regardless of strategy
+            x_unsorted = [50, 10, 90, 5, 20]
+            out = Vector{Int}(undef, length(x_unsorted))
+            for strategy in (LinearScan(), BracketGallop(), Auto())
+                searchsortedlast!(out, v, x_unsorted; strategy = strategy)
+                @test out == searchsortedlast.(Ref(v), x_unsorted)
+                searchsortedfirst!(out, v, x_unsorted; strategy = strategy)
+                @test out == searchsortedfirst.(Ref(v), x_unsorted)
+            end
+
+            # Reverse-order vector + reverse-sorted queries
+            v_rev = collect(10.0:-1.0:1.0)
+            x_rev_sorted = [9.5, 7.5, 5.0, 2.5, 0.5]   # sorted descending
+            out_r = Vector{Int}(undef, length(x_rev_sorted))
+            searchsortedlast!(
+                out_r, v_rev, x_rev_sorted; order = Base.Order.Reverse
+            )
+            @test out_r ==
+                [searchsortedlast(v_rev, x, Base.Order.Reverse) for x in x_rev_sorted]
+
+            # Floats + values between grid points
+            vf = collect(0.0:0.1:10.0)
+            xf = [0.5, 1.0, 2.5, 5.0, 9.5]
+            outf = Vector{Int}(undef, length(xf))
+            searchsortedlast!(outf, vf, xf)
+            @test outf == searchsortedlast.(Ref(vf), xf)
+
+            # Edge cases: out-of-range queries on each side
+            x_edges = [-5.0, 0.0, 5.0, 10.0, 15.0]
+            sort!(x_edges)
+            oute = Vector{Int}(undef, length(x_edges))
+            searchsortedlast!(oute, vf, x_edges)
+            @test oute == searchsortedlast.(Ref(vf), x_edges)
+            searchsortedfirst!(oute, vf, x_edges)
+            @test oute == searchsortedfirst.(Ref(vf), x_edges)
+
+            # Empty queries
+            @test searchsortedlast!(Int[], v, Int[]) == Int[]
+            @test searchsortedfirst!(Int[], v, Int[]) == Int[]
+
+            # DimensionMismatch
+            @test_throws DimensionMismatch searchsortedlast!(zeros(Int, 2), v, [1, 2, 3])
+            @test_throws DimensionMismatch searchsortedfirst!(zeros(Int, 2), v, [1, 2, 3])
+
+            # Sparse queries on a long vector — exercises the BracketGallop hint path
+            v_big = collect(1:100_000)
+            x_sparse = [100, 50_000, 99_900]
+            outb = Vector{Int}(undef, length(x_sparse))
+            searchsortedlast!(outb, v_big, x_sparse)
+            @test outb == searchsortedlast.(Ref(v_big), x_sparse)
+
+            # Existing allocating wrappers still work
+            @test searchsortedlastvec(v, x_sorted) ==
+                searchsortedlast.(Ref(v), x_sorted)
+            @test searchsortedfirstvec(v, x_sorted) ==
+                searchsortedfirst.(Ref(v), x_sorted)
+            @test searchsortedlastvec(v, x_unsorted) ==
+                searchsortedlast.(Ref(v), x_unsorted)
+        end
     end
 
     if GROUP == "QA"
