@@ -24,6 +24,21 @@ FindFirstFunctions.searchsortedfirstexp
 FindFirstFunctions.searchsortedfirstvec
 FindFirstFunctions.searchsortedlastvec
 FindFirstFunctions.findfirstsortedequal
+FindFirstFunctions.searchsortedfirst!
+FindFirstFunctions.searchsortedlast!
+```
+
+## Sorted-search strategies
+
+```@docs
+FindFirstFunctions.SearchStrategy
+FindFirstFunctions.LinearScan
+FindFirstFunctions.BracketGallop
+FindFirstFunctions.ExpFromLeft
+FindFirstFunctions.InterpolationSearch
+FindFirstFunctions.BinaryBracket
+FindFirstFunctions.GuesserHint
+FindFirstFunctions.Auto
 ```
 
 ## Contributing

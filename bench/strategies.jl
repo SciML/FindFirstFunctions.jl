@@ -274,8 +274,8 @@ function run_sweep(; title, ns, ms, spacings, query_patterns, strategies)
                 for m in ms
                     q = qp_fn(t, m)
                     results = Dict{String, Float64}()
-                    for (name, strat) in strategies
-                        results[name] = bench_batch(strat, t, q)
+                    for (name, strategy) in strategies
+                        results[name] = bench_batch(strategy, t, q)
                     end
                     results["base"] = bench_base(t, q)
                     best_name, best_t = "", Inf
