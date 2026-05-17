@@ -1,4 +1,5 @@
 /Manifest.toml
+bench/Manifest.toml
 docs/build
 docs/Manifest.toml
 docs/src/assets/Manifest.toml

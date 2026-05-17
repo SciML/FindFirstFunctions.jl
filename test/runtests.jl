@@ -269,6 +269,128 @@ end
             @test Auto <: SearchStrategy
         end
 
+        @safetestset "ExpFromLeft and InterpolationSearch" begin
+            using FindFirstFunctions:
+                ExpFromLeft, InterpolationSearch, BinaryBracket
+
+            # ExpFromLeft on uniform Int range
+            v = collect(1:1000)
+            for x in (0, 1, 50, 250, 500, 999, 1000, 1001), h in (1, 50, 500, 1000)
+                @test searchsortedlast(ExpFromLeft(), v, x, h) ==
+                    searchsortedlast(v, x)
+                @test searchsortedfirst(ExpFromLeft(), v, x, h) ==
+                    searchsortedfirst(v, x)
+            end
+            # ExpFromLeft without hint falls back to BinaryBracket
+            @test searchsortedlast(ExpFromLeft(), v, 500) == searchsortedlast(v, 500)
+            @test searchsortedfirst(ExpFromLeft(), v, 500) == searchsortedfirst(v, 500)
+
+            # InterpolationSearch on uniform Float64 range
+            vf = collect(0.0:0.1:10.0)
+            for x in (-1.0, 0.0, 0.05, 1.0, 5.5, 9.95, 10.0, 11.0)
+                @test searchsortedlast(InterpolationSearch(), vf, x) ==
+                    searchsortedlast(vf, x)
+                @test searchsortedfirst(InterpolationSearch(), vf, x) ==
+                    searchsortedfirst(vf, x)
+            end
+
+            # InterpolationSearch on log-spaced (non-uniform) — must still be correct
+            vlog = exp.(range(log(0.1), log(100.0); length = 256))
+            for x in (0.05, 0.1, 1.0, 50.0, 100.0, 150.0)
+                @test searchsortedlast(InterpolationSearch(), vlog, x) ==
+                    searchsortedlast(vlog, x)
+                @test searchsortedfirst(InterpolationSearch(), vlog, x) ==
+                    searchsortedfirst(vlog, x)
+            end
+
+            # InterpolationSearch ignores hint (computes its own guess)
+            for h in (1, 100, 256)
+                @test searchsortedlast(InterpolationSearch(), vlog, 50.0, h) ==
+                    searchsortedlast(vlog, 50.0)
+            end
+
+            # InterpolationSearch falls back to BinaryBracket on non-Number eltypes
+            vs = ["a", "b", "c", "d"]
+            @test searchsortedlast(InterpolationSearch(), vs, "c") ==
+                searchsortedlast(vs, "c")
+            @test searchsortedfirst(InterpolationSearch(), vs, "c", 2) ==
+                searchsortedfirst(vs, "c")
+
+            # InterpolationSearch on a constant vector (span=0) shouldn't divide
+            # by zero; should fall through to a bounded search and return a
+            # correct result.
+            vc = fill(3.0, 16)
+            @test searchsortedlast(InterpolationSearch(), vc, 3.0) ==
+                searchsortedlast(vc, 3.0)
+            @test searchsortedlast(InterpolationSearch(), vc, 2.0) ==
+                searchsortedlast(vc, 2.0)
+            @test searchsortedlast(InterpolationSearch(), vc, 4.0) ==
+                searchsortedlast(vc, 4.0)
+
+            # Edge: 1-element and 2-element vectors
+            @test searchsortedlast(ExpFromLeft(), [5], 4, 1) == 0
+            @test searchsortedlast(ExpFromLeft(), [5], 5, 1) == 1
+            @test searchsortedlast(ExpFromLeft(), [5], 6, 1) == 1
+            @test searchsortedfirst(ExpFromLeft(), [5, 10], 7, 1) == 2
+            @test searchsortedlast(InterpolationSearch(), [5], 4) == 0
+            @test searchsortedlast(InterpolationSearch(), [5, 10], 7) == 1
+        end
+
+        @safetestset "Batched Auto heuristic" begin
+            using FindFirstFunctions:
+                Auto, LinearScan, ExpFromLeft, BracketGallop, BinaryBracket,
+                searchsortedlast!
+            using StableRNGs
+
+            # Dense queries: Auto's avg-gap heuristic should land on LinearScan
+            # (verified by output correctness, not by introspecting the picked
+            # strategy — that's an implementation detail).
+            v = collect(0.0:0.01:10.0)   # n=1001
+            tt_dense = sort!(rand(StableRNG(1), 4096) .* 10.0)
+            out_auto = Vector{Int}(undef, length(tt_dense))
+            out_linear = Vector{Int}(undef, length(tt_dense))
+            searchsortedlast!(out_auto, v, tt_dense; strategy = Auto())
+            searchsortedlast!(out_linear, v, tt_dense; strategy = LinearScan())
+            @test out_auto == out_linear
+
+            # Sparse queries on a long vector: same correctness check.
+            v_long = collect(0.0:0.001:100.0)  # n=100001
+            tt_sparse = sort!(rand(StableRNG(2), 10) .* 100.0)
+            out_a = Vector{Int}(undef, length(tt_sparse))
+            out_e = Vector{Int}(undef, length(tt_sparse))
+            searchsortedlast!(out_a, v_long, tt_sparse; strategy = Auto())
+            searchsortedlast!(out_e, v_long, tt_sparse; strategy = ExpFromLeft())
+            @test out_a == out_e
+
+            # Dense burst — queries clustered inside one segment of v.
+            # The span-based gap detection should send Auto to LinearScan.
+            seg_lo = v[length(v) ÷ 2]
+            seg_hi = v[length(v) ÷ 2 + 1]
+            tt_burst = sort!(seg_lo .+ (seg_hi - seg_lo) .* rand(StableRNG(3), 2048))
+            out_b = Vector{Int}(undef, length(tt_burst))
+            out_l = Vector{Int}(undef, length(tt_burst))
+            searchsortedlast!(out_b, v, tt_burst; strategy = Auto())
+            searchsortedlast!(out_l, v, tt_burst; strategy = LinearScan())
+            @test out_b == out_l
+
+            # m=1 fast path — bypass span heuristic
+            out1 = Vector{Int}(undef, 1)
+            searchsortedlast!(out1, v, [5.123]; strategy = Auto())
+            @test out1[1] == searchsortedlast(v, 5.123)
+
+            # m=0 returns the output untouched (empty vector)
+            empty_out = Int[]
+            @test searchsortedlast!(empty_out, v, Float64[]; strategy = Auto()) === empty_out
+            @test isempty(empty_out)
+
+            # Non-numeric eltype: span heuristic falls back to length-ratio.
+            vs = ["a", "b", "c", "d", "e", "f", "g", "h"]
+            qs = ["b", "d", "f"]
+            outs = Vector{Int}(undef, length(qs))
+            searchsortedlast!(outs, vs, qs; strategy = Auto())
+            @test outs == searchsortedlast.(Ref(vs), qs)
+        end
+
         @safetestset "Batched in-place searchsorted!" begin
             using FindFirstFunctions:
                 LinearScan, BracketGallop, BinaryBracket, Auto,

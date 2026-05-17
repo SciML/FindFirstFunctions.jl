@@ -1,0 +1,8 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+FindFirstFunctions = "64ca27bc-2ba2-4a57-88aa-44e436879224"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
+
+[sources]
+FindFirstFunctions = {path = ".."}

@@ -203,17 +203,24 @@ Abstract supertype for sorted-search strategies. Concrete subtypes select how
 [`searchsortedfirst`](@ref Base.searchsortedfirst) should be performed when
 called with a strategy as the first positional argument:
 
-  - [`LinearScan`](@ref) walks ±1 from the hint until the answer is bracketed.
-    Cheapest when the target is within a few positions of the hint; degrades
-    linearly otherwise.
-  - [`BracketGallop`](@ref) expands an exponential bracket from the hint, then
-    binary-searches inside it. Effectively O(1) when the target is near the
-    hint; never worse than ~2 log₂ n comparisons. This is the strategy used
-    by the legacy [`searchsortedfirstcorrelated`](@ref) / [`searchsortedlastcorrelated`](@ref).
+  - [`LinearScan`](@ref) walks ±1 from the hint. Cheapest when the target is
+    within a few positions of the hint; degrades linearly otherwise.
+  - [`BracketGallop`](@ref) expands an exponential bracket bidirectionally
+    from the hint, then binary-searches inside it. Effectively O(1) when the
+    target is near the hint; never worse than ~2 log₂ n comparisons. This is
+    the strategy used by the legacy [`searchsortedfirstcorrelated`](@ref) /
+    [`searchsortedlastcorrelated`](@ref).
+  - [`ExpFromLeft`](@ref) expands rightward from a left-bound hint by
+    doubling, then binary-searches inside the final bracket. Best for batched
+    sorted queries where each next query's hint is the previous result.
+  - [`InterpolationSearch`](@ref) guesses the answer by linearly extrapolating
+    between `v[lo]` and `v[hi]`, then refines with a bounded binary search.
+    O(1) per query on uniformly-spaced data; falls back to O(log n) on
+    irregular data.
   - [`BinaryBracket`](@ref) is the standard `Base.searchsortedlast` /
     `Base.searchsortedfirst` with no hint. Use it when no useful hint exists.
   - [`Auto`](@ref) heuristically picks one of the above based on the size of
-    `v` and whether a hint was supplied.
+    `v`, the spacing of `v`, and whether a hint was supplied.
 
 Strategies can also be passed to the batched
 [`searchsortedlast!`](@ref) / [`searchsortedfirst!`](@ref) APIs.
@@ -240,6 +247,37 @@ when no hint is supplied.
 struct BracketGallop <: SearchStrategy end
 
 """
+    ExpFromLeft <: SearchStrategy
+
+Exponential search forward from the hint (interpreted as a left bound), then
+binary search in the final bracket. The hint is a *lower* bound rather than a
+center guess, which is what batched sorted-search loops typically want:
+`hint = previous_result`.
+
+Specifically: starting at `lo = hint`, check `v[lo], v[lo+1], ..., v[lo+4]`
+linearly, then `v[lo+8], v[lo+16], …` exponentially, until `x` is bracketed,
+then binary-search inside the bracket. Same algorithm as the standalone
+[`searchsortedfirstexp`](@ref), wrapped here as a dispatchable strategy.
+
+Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
+"""
+struct ExpFromLeft <: SearchStrategy end
+
+"""
+    InterpolationSearch <: SearchStrategy
+
+Guesses an index by linearly extrapolating `x` between `v[lo]` and `v[hi]`,
+then refines with a bounded binary search. O(1) per query on uniformly-spaced
+data (e.g. `collect(0:0.1:10)`); falls back to O(log n) otherwise. Requires
+`x` to be subtractable with elements of `v` (i.e., a numeric ordering).
+
+Ignores any hint that is supplied — the guess is computed fresh from the
+endpoints. Falls back to [`BinaryBracket`](@ref) for non-numeric element
+types where subtraction isn't defined.
+"""
+struct InterpolationSearch <: SearchStrategy end
+
+"""
     BinaryBracket <: SearchStrategy
 
 Plain `Base.searchsortedlast` / `Base.searchsortedfirst`. Ignores any hint
@@ -250,17 +288,46 @@ struct BinaryBracket <: SearchStrategy end
 """
     Auto <: SearchStrategy
 
-Heuristically picks among [`LinearScan`](@ref), [`BracketGallop`](@ref), and
-[`BinaryBracket`](@ref):
+Heuristically picks among [`LinearScan`](@ref), [`ExpFromLeft`](@ref),
+[`BracketGallop`](@ref), and [`BinaryBracket`](@ref). The choice depends on
+the calling context:
 
+**Per-query** (`searchsortedlast(Auto(), v, x[, hint])`):
   - No hint, or hint outside `axes(v)` → [`BinaryBracket`](@ref).
-  - Hint in range and `length(v) ≤ 32` → [`LinearScan`](@ref) (binary-search
-    setup overhead exceeds the worst-case linear walk on tiny vectors).
-  - Hint in range and `length(v) > 32` → [`BracketGallop`](@ref).
+  - Hint in range, `length(v) ≤ 16` → [`LinearScan`](@ref).
+  - Hint in range, `length(v) > 16` → [`BracketGallop`](@ref).
+
+**Batched sorted** (`searchsortedlast!(out, v, queries; strategy = Auto())`),
+where the expected average gap between consecutive results is
+`avg_gap = length(v) / length(queries)`:
+  - `avg_gap ≤ 4` → [`LinearScan`](@ref) (most queries land in the same
+    segment or the next; linear-walk overhead is minimal, and `ExpFromLeft`
+    wastes its 5 initial linear probes when the gap is already 0 or 1).
+  - `avg_gap > 4` → [`ExpFromLeft`](@ref) (linear probes for very small
+    jumps, doubling for medium, bounded binary search for far — always
+    moving forward from the previous result, which is what
+    `BracketGallop`'s bidirectional bracketing wastes effort on).
+
+**Batched unsorted**: falls back to per-element `Base.searchsortedlast` /
+`Base.searchsortedfirst` with no hint regardless of strategy.
+
+[`InterpolationSearch`](@ref) is intentionally not part of the `Auto` choice
+because it requires the element type to be subtractable and benefits most
+when the user knows the data is roughly linearly spaced. Opt in explicitly
+with `strategy = InterpolationSearch()` when that's the case.
 """
 struct Auto <: SearchStrategy end
 
-const _AUTO_LINEAR_THRESHOLD = 32
+# Per-query Auto threshold: under this length, the bracket-search bookkeeping
+# costs more than a worst-case linear walk.
+const _AUTO_LINEAR_THRESHOLD = 16
+
+# Batched-Auto crossover: at gap ≤ 4 LinearScan beats ExpFromLeft (its 5
+# initial linear probes are wasted when the gap is already 0 or 1).
+# Above 4, ExpFromLeft handles arbitrary gap sizes via doubling — the
+# bench sweep shows it strictly beats BracketGallop for forward-moving
+# sorted queries.
+const _AUTO_BATCH_LINEAR_GAP = 4
 
 # Strategy: BinaryBracket — ignore any hint.
 Base.searchsortedlast(
@@ -370,6 +437,137 @@ Base.searchsortedfirst(
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
+# Strategy: ExpFromLeft — galloping forward from a left-bound hint.
+#
+# Contract: callers pass `hint` such that the answer is ≥ `hint`. When that
+# isn't true (hint is past the answer), we fall back to a full
+# `searchsortedlast`/`searchsortedfirst` — the batched-sorted loop sets
+# `hint = prev_result`, which always satisfies this for sorted queries, so the
+# fallback is only exercised by arbitrary single-query callers.
+function Base.searchsortedfirst(
+        ::ExpFromLeft, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    if isempty(v)
+        return lo
+    end
+    h = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, x, v[h])
+        # x < v[hint] → hint is past the answer; full search.
+        return searchsortedfirst(v, x, order)
+    end
+    return order === Base.Order.Forward ?
+        searchsortedfirstexp(v, x, h, hi) :
+        searchsortedfirst(v, x, h, hi, order)
+end
+
+function Base.searchsortedlast(
+        ::ExpFromLeft, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    if isempty(v)
+        return lo - 1
+    end
+    h = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, x, v[h])
+        return searchsortedlast(v, x, order)
+    end
+    if order === Base.Order.Forward
+        y = searchsortedfirstexp(v, x, h, hi)
+        return if y > hi
+            hi
+        else
+            @inbounds v[y] == x ? y : y - 1
+        end
+    else
+        return searchsortedlast(v, x, h, hi, order)
+    end
+end
+
+# ExpFromLeft without a hint falls back to BinaryBracket.
+Base.searchsortedlast(
+    ::ExpFromLeft, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::ExpFromLeft, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Strategy: InterpolationSearch — extrapolate a guess, then bounded binary search.
+@inline function _interp_guess(v::AbstractVector, x, lo::Integer, hi::Integer)
+    @inbounds vlo = v[lo]
+    @inbounds vhi = v[hi]
+    span = vhi - vlo
+    iszero(span) && return lo
+    # Linear extrapolation: how far is x along [vlo, vhi]?
+    f = (x - vlo) / span
+    if !isfinite(f)
+        return f > 0 ? hi : lo
+    end
+    g = lo + round(Int, f * (hi - lo))
+    return clamp(g, lo, hi)
+end
+
+function Base.searchsortedlast(
+        ::InterpolationSearch, v::AbstractVector{<:Number}, x::Number;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if order !== Base.Order.Forward
+        # Linear interpolation doesn't carry over to reverse order; fall back
+        return searchsortedlast(v, x, order)
+    end
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo - 1
+    g = _interp_guess(v, x, lo, hi)
+    return searchsortedlast(BracketGallop(), v, x, g; order = order)
+end
+
+function Base.searchsortedfirst(
+        ::InterpolationSearch, v::AbstractVector{<:Number}, x::Number;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if order !== Base.Order.Forward
+        return searchsortedfirst(v, x, order)
+    end
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo
+    g = _interp_guess(v, x, lo, hi)
+    return searchsortedfirst(BracketGallop(), v, x, g; order = order)
+end
+
+# InterpolationSearch ignores any hint; pass-through.
+Base.searchsortedlast(
+    s::InterpolationSearch, v::AbstractVector{<:Number}, x::Number, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(s, v, x; order = order)
+Base.searchsortedfirst(
+    s::InterpolationSearch, v::AbstractVector{<:Number}, x::Number, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(s, v, x; order = order)
+
+# InterpolationSearch on non-numeric data falls back to BinaryBracket.
+Base.searchsortedlast(
+    ::InterpolationSearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::InterpolationSearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+Base.searchsortedlast(
+    s::InterpolationSearch, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    s::InterpolationSearch, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
 # Strategy: Auto — pick based on hint validity and length(v).
 @inline function _auto_pick(v::AbstractVector, hint::Integer)
     return if hint < firstindex(v) || hint > lastindex(v)
@@ -380,6 +578,43 @@ Base.searchsortedfirst(
         BracketGallop()
     end
 end
+
+# Batched Auto: pick based on the expected average gap between consecutive
+# results.
+#
+# For numeric data we can do better than `n / m`: the queries' actual span as
+# a fraction of `v`'s span tells us how clustered they really are. e.g.
+# 4096 sorted queries crammed into a single segment of a 65k-long `v` have
+# n/m = 16 but actual_gap = 0; the span heuristic catches that.
+@inline function _auto_pick_batched(v::AbstractVector, queries::AbstractVector)
+    m = length(queries)
+    if m == 0
+        return BinaryBracket()
+    end
+    gap = _estimate_avg_gap(v, queries, m)
+    return gap <= _AUTO_BATCH_LINEAR_GAP ? LinearScan() : ExpFromLeft()
+end
+
+@inline function _estimate_avg_gap(
+        v::AbstractVector{<:Number}, queries::AbstractVector{<:Number}, m::Integer
+    )
+    n = length(v)
+    n <= 1 && return 0
+    @inbounds span_v = v[end] - v[1]
+    if iszero(span_v) || !isfinite(span_v)
+        return n ÷ max(1, m)
+    end
+    @inbounds span_q = queries[end] - queries[1]
+    ratio = span_q / span_v
+    # Clamp ratio: queries may extend outside v's range (extrapolation).
+    ratio = clamp(ratio, zero(ratio), one(ratio))
+    return floor(Int, n * ratio / max(1, m))
+end
+
+# Non-numeric eltypes: no span subtraction possible, fall back to length ratio.
+@inline _estimate_avg_gap(
+    v::AbstractVector, ::AbstractVector, m::Integer
+) = length(v) ÷ max(1, m)
 
 function Base.searchsortedlast(
         ::Auto, v::AbstractVector, x, hint::Integer;
@@ -471,50 +706,133 @@ function searchsortedfirst!(
     return _searchsortedfirst_batched!(idx_out, v, queries, strategy, order)
 end
 
+# Sorted inner loop, parameterized on strategy. Used by both the generic and
+# Auto batched entry points so each batch performs at most one issorted check.
+function _searchsortedlast_sorted_loop!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        strategy::SearchStrategy, order::Base.Order.Ordering
+    )
+    hint = firstindex(v) - 1
+    @inbounds for k in eachindex(queries)
+        q = queries[k]
+        hint = if hint < firstindex(v)
+            searchsortedlast(strategy, v, q; order = order)
+        else
+            searchsortedlast(strategy, v, q, hint; order = order)
+        end
+        idx_out[k] = hint
+    end
+    return idx_out
+end
+
+function _searchsortedfirst_sorted_loop!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        strategy::SearchStrategy, order::Base.Order.Ordering
+    )
+    hint = firstindex(v) - 1
+    @inbounds for k in eachindex(queries)
+        q = queries[k]
+        hint = if hint < firstindex(v)
+            searchsortedfirst(strategy, v, q; order = order)
+        else
+            searchsortedfirst(strategy, v, q, hint; order = order)
+        end
+        idx_out[k] = hint
+    end
+    return idx_out
+end
+
+function _searchsortedlast_unsorted_loop!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        order::Base.Order.Ordering
+    )
+    @inbounds for k in eachindex(queries)
+        idx_out[k] = searchsortedlast(v, queries[k], order)
+    end
+    return idx_out
+end
+
+function _searchsortedfirst_unsorted_loop!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        order::Base.Order.Ordering
+    )
+    @inbounds for k in eachindex(queries)
+        idx_out[k] = searchsortedfirst(v, queries[k], order)
+    end
+    return idx_out
+end
+
 function _searchsortedlast_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
         strategy::SearchStrategy, order::Base.Order.Ordering
     )
-    if issorted(queries; order = order)
-        hint = firstindex(v) - 1
-        @inbounds for k in eachindex(queries)
-            q = queries[k]
-            hint = if hint < firstindex(v)
-                searchsortedlast(strategy, v, q; order = order)
-            else
-                searchsortedlast(strategy, v, q, hint; order = order)
-            end
-            idx_out[k] = hint
-        end
+    return if issorted(queries; order = order)
+        _searchsortedlast_sorted_loop!(idx_out, v, queries, strategy, order)
     else
-        @inbounds for k in eachindex(queries)
-            idx_out[k] = searchsortedlast(v, queries[k], order)
-        end
+        _searchsortedlast_unsorted_loop!(idx_out, v, queries, order)
     end
-    return idx_out
+end
+
+# Specialized batched-Auto: pick an inner strategy from the n/m ratio, then
+# call the sorted loop directly (no duplicate `issorted` check, and each
+# branch is type-stable so the loop specializes on the concrete strategy).
+function _searchsortedlast_batched!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        ::Auto, order::Base.Order.Ordering
+    )
+    m = length(queries)
+    m == 0 && return idx_out
+    # m == 1: skip the issorted + span heuristic — no batched hint is
+    # available for a single-element batch, so just dispatch straight to
+    # the unhinted backing call. Saves ~20 ns of bookkeeping per call.
+    if m == 1
+        @inbounds idx_out[firstindex(idx_out)] =
+            searchsortedlast(v, queries[firstindex(queries)], order)
+        return idx_out
+    end
+    if !issorted(queries; order = order)
+        return _searchsortedlast_unsorted_loop!(idx_out, v, queries, order)
+    end
+    gap = _estimate_avg_gap(v, queries, m)
+    # Manually dispatch on the picked strategy so each branch is concrete.
+    return if gap <= _AUTO_BATCH_LINEAR_GAP
+        _searchsortedlast_sorted_loop!(idx_out, v, queries, LinearScan(), order)
+    else
+        _searchsortedlast_sorted_loop!(idx_out, v, queries, ExpFromLeft(), order)
+    end
 end
 
 function _searchsortedfirst_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
         strategy::SearchStrategy, order::Base.Order.Ordering
     )
-    if issorted(queries; order = order)
-        hint = firstindex(v) - 1
-        @inbounds for k in eachindex(queries)
-            q = queries[k]
-            hint = if hint < firstindex(v)
-                searchsortedfirst(strategy, v, q; order = order)
-            else
-                searchsortedfirst(strategy, v, q, hint; order = order)
-            end
-            idx_out[k] = hint
-        end
+    return if issorted(queries; order = order)
+        _searchsortedfirst_sorted_loop!(idx_out, v, queries, strategy, order)
     else
-        @inbounds for k in eachindex(queries)
-            idx_out[k] = searchsortedfirst(v, queries[k], order)
-        end
+        _searchsortedfirst_unsorted_loop!(idx_out, v, queries, order)
     end
-    return idx_out
+end
+
+function _searchsortedfirst_batched!(
+        idx_out, v::AbstractVector, queries::AbstractVector,
+        ::Auto, order::Base.Order.Ordering
+    )
+    m = length(queries)
+    m == 0 && return idx_out
+    if m == 1
+        @inbounds idx_out[firstindex(idx_out)] =
+            searchsortedfirst(v, queries[firstindex(queries)], order)
+        return idx_out
+    end
+    if !issorted(queries; order = order)
+        return _searchsortedfirst_unsorted_loop!(idx_out, v, queries, order)
+    end
+    gap = _estimate_avg_gap(v, queries, m)
+    return if gap <= _AUTO_BATCH_LINEAR_GAP
+        _searchsortedfirst_sorted_loop!(idx_out, v, queries, LinearScan(), order)
+    else
+        _searchsortedfirst_sorted_loop!(idx_out, v, queries, ExpFromLeft(), order)
+    end
 end
 
 """
