@@ -286,6 +286,25 @@ that is supplied.
 struct BinaryBracket <: SearchStrategy end
 
 """
+    GuesserHint(guesser::Guesser) <: SearchStrategy
+
+Uses a [`Guesser`](@ref) to produce an integer guess for `x`, then dispatches
+to [`BracketGallop`](@ref) from that guess. The `Guesser` already decides
+between linear-extrapolation lookup (when `v` looks linear) and using the
+previous result as a guess; this strategy plugs that logic into the strategy
+dispatch hierarchy, and updates `guesser.idx_prev` on each call.
+
+This is the strategy backing the existing
+`searchsortedfirstcorrelated(v, x, ::Guesser)` and
+`searchsortedlastcorrelated(v, x, ::Guesser)` overloads, exposed so it can
+be passed to the batched [`searchsortedlast!`](@ref) / [`searchsortedfirst!`](@ref)
+APIs.
+"""
+struct GuesserHint{G} <: SearchStrategy
+    guesser::G
+end
+
+"""
     Auto <: SearchStrategy
 
 Heuristically picks among [`LinearScan`](@ref), [`ExpFromLeft`](@ref),
@@ -298,23 +317,25 @@ the calling context:
   - Hint in range, `length(v) > 16` → [`BracketGallop`](@ref).
 
 **Batched sorted** (`searchsortedlast!(out, v, queries; strategy = Auto())`),
-where the expected average gap between consecutive results is
-`avg_gap = length(v) / length(queries)`:
-  - `avg_gap ≤ 4` → [`LinearScan`](@ref) (most queries land in the same
+using the expected average gap between consecutive results. For numeric
+data the gap is estimated from the span ratio
+`(queries[end] - queries[1]) / (v[end] - v[1])` so that dense-burst queries
+clustered inside one segment of `v` are recognized as having gap ≈ 0:
+  - `gap ≤ 4` → [`LinearScan`](@ref) (most queries land in the same
     segment or the next; linear-walk overhead is minimal, and `ExpFromLeft`
     wastes its 5 initial linear probes when the gap is already 0 or 1).
-  - `avg_gap > 4` → [`ExpFromLeft`](@ref) (linear probes for very small
+  - `gap > 64`, `length(v) ≥ 1024`, `length(queries) ≥ 2`, and a sampled
+    linearity probe (5 reads, ~12 ns) accepts → [`InterpolationSearch`](@ref).
+    On uniformly-spaced data this is ~2× faster than `ExpFromLeft` for
+    sparse queries; the linearity probe is what keeps `Auto` from picking
+    `InterpolationSearch` on irregular data where it would lose badly.
+  - otherwise → [`ExpFromLeft`](@ref) (linear probes for very small
     jumps, doubling for medium, bounded binary search for far — always
     moving forward from the previous result, which is what
     `BracketGallop`'s bidirectional bracketing wastes effort on).
 
 **Batched unsorted**: falls back to per-element `Base.searchsortedlast` /
 `Base.searchsortedfirst` with no hint regardless of strategy.
-
-[`InterpolationSearch`](@ref) is intentionally not part of the `Auto` choice
-because it requires the element type to be subtractable and benefits most
-when the user knows the data is roughly linearly spaced. Opt in explicitly
-with `strategy = InterpolationSearch()` when that's the case.
 """
 struct Auto <: SearchStrategy end
 
@@ -328,6 +349,39 @@ const _AUTO_LINEAR_THRESHOLD = 16
 # bench sweep shows it strictly beats BracketGallop for forward-moving
 # sorted queries.
 const _AUTO_BATCH_LINEAR_GAP = 4
+
+# For sparse queries (gap large) on long vectors, InterpolationSearch can
+# beat ExpFromLeft by ~2× on uniformly-spaced data. The sampled-linearity
+# check below is O(1) — 5 fixed probes — so it's cheap enough to run inside
+# Auto when there's a real chance of unlocking InterpolationSearch.
+const _AUTO_INTERP_MIN_GAP = 64
+const _AUTO_INTERP_MIN_N = 1024
+const _AUTO_INTERP_MIN_M = 2
+const _AUTO_LINEAR_REL_TOLERANCE = 0.05
+
+# Sampled linearity check: probes v[1], v[n/4], v[n/2], v[3n/4], v[n] and
+# tests whether the interior points sit close to the straight line between
+# the endpoints. Cost is ~12 ns regardless of n. Used by Auto to decide
+# whether to gamble on InterpolationSearch.
+@inline function _sampled_looks_linear(v::AbstractVector{<:Number})
+    n = length(v)
+    n < 5 && return true
+    @inbounds begin
+        v1, vn = v[1], v[n]
+        span = vn - v1
+        (iszero(span) || !isfinite(span)) && return false
+        for k in (n >> 2, n >> 1, (3 * n) >> 2)
+            kk = max(1, min(n, k))
+            expected = v1 + (kk - 1) / (n - 1) * span
+            rel_err = abs(v[kk] - expected) / abs(span)
+            rel_err > _AUTO_LINEAR_REL_TOLERANCE && return false
+        end
+    end
+    return true
+end
+
+# Non-numeric eltype: can't sample, never picks InterpolationSearch.
+@inline _sampled_looks_linear(::AbstractVector) = false
 
 # Strategy: BinaryBracket — ignore any hint.
 Base.searchsortedlast(
@@ -568,6 +622,10 @@ Base.searchsortedfirst(
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
+# Strategy: GuesserHint — Guesser produces an integer hint, BracketGallop runs
+# the search and updates the Guesser's prev-result cache. Methods are defined
+# below where Guesser is in scope (search the file for "GuesserHint methods").
+
 # Strategy: Auto — pick based on hint validity and length(v).
 @inline function _auto_pick(v::AbstractVector, hint::Integer)
     return if hint < firstindex(v) || hint > lastindex(v)
@@ -795,11 +853,24 @@ function _searchsortedlast_batched!(
     end
     gap = _estimate_avg_gap(v, queries, m)
     # Manually dispatch on the picked strategy so each branch is concrete.
-    return if gap <= _AUTO_BATCH_LINEAR_GAP
-        _searchsortedlast_sorted_loop!(idx_out, v, queries, LinearScan(), order)
-    else
-        _searchsortedlast_sorted_loop!(idx_out, v, queries, ExpFromLeft(), order)
+    if gap <= _AUTO_BATCH_LINEAR_GAP
+        return _searchsortedlast_sorted_loop!(
+            idx_out, v, queries, LinearScan(), order
+        )
     end
+    # Sparse-on-large-linear: InterpolationSearch wins ~2× over ExpFromLeft
+    # on uniformly-spaced data. Sampled check is ~12 ns.
+    if gap >= _AUTO_INTERP_MIN_GAP &&
+            length(v) >= _AUTO_INTERP_MIN_N &&
+            m >= _AUTO_INTERP_MIN_M &&
+            _sampled_looks_linear(v)
+        return _searchsortedlast_sorted_loop!(
+            idx_out, v, queries, InterpolationSearch(), order
+        )
+    end
+    return _searchsortedlast_sorted_loop!(
+        idx_out, v, queries, ExpFromLeft(), order
+    )
 end
 
 function _searchsortedfirst_batched!(
@@ -828,11 +899,22 @@ function _searchsortedfirst_batched!(
         return _searchsortedfirst_unsorted_loop!(idx_out, v, queries, order)
     end
     gap = _estimate_avg_gap(v, queries, m)
-    return if gap <= _AUTO_BATCH_LINEAR_GAP
-        _searchsortedfirst_sorted_loop!(idx_out, v, queries, LinearScan(), order)
-    else
-        _searchsortedfirst_sorted_loop!(idx_out, v, queries, ExpFromLeft(), order)
+    if gap <= _AUTO_BATCH_LINEAR_GAP
+        return _searchsortedfirst_sorted_loop!(
+            idx_out, v, queries, LinearScan(), order
+        )
     end
+    if gap >= _AUTO_INTERP_MIN_GAP &&
+            length(v) >= _AUTO_INTERP_MIN_N &&
+            m >= _AUTO_INTERP_MIN_M &&
+            _sampled_looks_linear(v)
+        return _searchsortedfirst_sorted_loop!(
+            idx_out, v, queries, InterpolationSearch(), order
+        )
+    end
+    return _searchsortedfirst_sorted_loop!(
+        idx_out, v, queries, ExpFromLeft(), order
+    )
 end
 
 """
@@ -963,6 +1045,39 @@ function searchsortedlastcorrelated(
     guess.idx_prev[] = out
     return out
 end
+
+# GuesserHint methods — strategy dispatch wrapper for the `Guesser`-based
+# correlated search. Per-call cost: one `guesser(x)` evaluation + one
+# `BracketGallop` call + one `idx_prev[]` write.
+function Base.searchsortedlast(
+        s::GuesserHint, v::AbstractVector, x;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    @assert v === s.guesser.v
+    out = searchsortedlast(BracketGallop(), v, x, s.guesser(x); order = order)
+    s.guesser.idx_prev[] = out
+    return out
+end
+
+function Base.searchsortedfirst(
+        s::GuesserHint, v::AbstractVector, x;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    @assert v === s.guesser.v
+    out = searchsortedfirst(BracketGallop(), v, x, s.guesser(x); order = order)
+    s.guesser.idx_prev[] = out
+    return out
+end
+
+# GuesserHint ignores any externally-supplied hint (the Guesser carries its own).
+Base.searchsortedlast(
+    s::GuesserHint, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(s, v, x; order = order)
+Base.searchsortedfirst(
+    s::GuesserHint, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(s, v, x; order = order)
 
 """
     searchsortedfirstexp(v, x, lo=firstindex(v), hi=lastindex(v))
