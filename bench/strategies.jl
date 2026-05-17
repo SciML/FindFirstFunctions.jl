@@ -136,6 +136,7 @@ end
 
 # Arithmetic progression covering the full range of t.
 function queries_arithmetic(t::Vector, m::Integer)
+    m <= 1 && return [(first(t) + last(t)) / 2]
     return collect(range(first(t), last(t); length = m))
 end
 
@@ -416,6 +417,186 @@ function sweep_extreme()
     return (sparse = res_sparse, dense = res_dense)
 end
 
+"""
+    sweep_tune_gap_linear_vs_exp()
+
+Empirical crossover between `LinearScan` and `ExpFromLeft` as a function of
+the gap between consecutive query results. Runs at a fixed large `n` on
+uniform data (so per-segment work is dominated by the per-query inner-loop
+overhead, not by data-shape effects), sweeping `m` so the average gap covers
+0..256. We're looking for the largest gap at which LinearScan still wins.
+"""
+function sweep_tune_gap_linear_vs_exp()
+    n = 4096
+    t = knots_uniform(n)
+    println("\n## Tune: LinearScan vs ExpFromLeft crossover (n=$n, uniform)\n")
+    println("| gap (≈n/m) | m | Linear | ExpFromLeft | winner | margin |")
+    println("|---|---|---|---|---|---|")
+    pairs = [
+        (gap, max(1, n ÷ gap)) for gap in (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256)
+    ]
+    for (gap_target, m) in pairs
+        q = queries_uniform(t, m)
+        t_lin = bench_batch(LinearScan(), t, q)
+        t_exp = bench_batch(ExpFromLeft(), t, q)
+        winner = t_lin <= t_exp ? "Linear" : "ExpFromLeft"
+        margin = abs(t_lin - t_exp) / min(t_lin, t_exp)
+        @printf(
+            "| %d | %d | %s | %s | %s | %.0f%% |\n",
+            gap_target, m, format_ns(t_lin), format_ns(t_exp),
+            winner, 100 * margin
+        )
+    end
+    return
+end
+
+"""
+    sweep_tune_gap_exp_vs_interp()
+
+Empirical crossover between `ExpFromLeft` and `InterpolationSearch` on
+uniform data, where InterpolationSearch's per-query O(1) advantage is
+maximum. Sweeps `m` from sparse to dense at fixed `n`.
+"""
+function sweep_tune_gap_exp_vs_interp()
+    n = 65_536
+    t = knots_uniform(n)
+    println("\n## Tune: ExpFromLeft vs InterpolationSearch crossover (n=$n, uniform)\n")
+    println("| gap (≈n/m) | m | ExpFromLeft | InterpSearch | winner | margin |")
+    println("|---|---|---|---|---|---|")
+    pairs = [
+        (gap, max(1, n ÷ gap)) for gap in
+            (8, 16, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 4096, 16_384, 65_536)
+    ]
+    for (gap_target, m) in pairs
+        q = queries_uniform(t, m)
+        t_exp = bench_batch(ExpFromLeft(), t, q)
+        t_int = bench_batch(InterpolationSearch(), t, q)
+        winner = t_exp <= t_int ? "ExpFromLeft" : "InterpSearch"
+        margin = abs(t_exp - t_int) / min(t_exp, t_int)
+        @printf(
+            "| %d | %d | %s | %s | %s | %.0f%% |\n",
+            gap_target, m, format_ns(t_exp), format_ns(t_int),
+            winner, 100 * margin
+        )
+    end
+    return
+end
+
+"""
+    sweep_tune_n_for_interp()
+
+How does the InterpolationSearch break-even shift with `n`? Fix `m=16`,
+vary `n`, compare InterpolationSearch vs ExpFromLeft. Useful for picking
+`_AUTO_INTERP_MIN_N`.
+"""
+function sweep_tune_n_for_interp()
+    println("\n## Tune: minimum n at which InterpolationSearch wins (uniform, m=16)\n")
+    println("| n | gap | ExpFromLeft | InterpSearch | winner | margin |")
+    println("|---|---|---|---|---|---|")
+    m = 16
+    for n in (32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16_384, 65_536, 262_144)
+        t = knots_uniform(n)
+        q = queries_uniform(t, m)
+        t_exp = bench_batch(ExpFromLeft(), t, q)
+        t_int = bench_batch(InterpolationSearch(), t, q)
+        gap = n ÷ m
+        winner = t_exp <= t_int ? "ExpFromLeft" : "InterpSearch"
+        margin = abs(t_exp - t_int) / min(t_exp, t_int)
+        @printf(
+            "| %d | %d | %s | %s | %s | %.0f%% |\n",
+            n, gap, format_ns(t_exp), format_ns(t_int),
+            winner, 100 * margin
+        )
+    end
+    return
+end
+
+"""
+    sweep_tune_m_for_interp()
+
+How does the break-even shift with `m`? Fix `n=65_536` (large), vary `m`,
+compare InterpolationSearch vs ExpFromLeft. Useful for picking
+`_AUTO_INTERP_MIN_M`.
+"""
+function sweep_tune_m_for_interp()
+    println("\n## Tune: minimum m at which InterpolationSearch wins (uniform, n=65536)\n")
+    println("| m | gap | ExpFromLeft | InterpSearch | winner | margin |")
+    println("|---|---|---|---|---|---|")
+    n = 65_536
+    t = knots_uniform(n)
+    for m in (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128, 256, 1024, 4096)
+        q = queries_uniform(t, m)
+        t_exp = bench_batch(ExpFromLeft(), t, q)
+        t_int = bench_batch(InterpolationSearch(), t, q)
+        gap = n ÷ max(1, m)
+        winner = t_exp <= t_int ? "ExpFromLeft" : "InterpSearch"
+        margin = abs(t_exp - t_int) / min(t_exp, t_int)
+        @printf(
+            "| %d | %d | %s | %s | %s | %.0f%% |\n",
+            m, gap, format_ns(t_exp), format_ns(t_int),
+            winner, 100 * margin
+        )
+    end
+    return
+end
+
+"""
+    sweep_tune_interp_on_nonlinear()
+
+Worst case for InterpolationSearch — measure how badly it loses on each
+non-linear spacing. This bounds the downside risk of accidentally picking
+InterpolationSearch when the linearity probe gives a false positive.
+"""
+function sweep_tune_interp_on_nonlinear()
+    println("\n## Tune: InterpolationSearch downside on non-linear data (m=256)\n")
+    println("| spacing | n | ExpFromLeft | InterpSearch | InterpSearch slowdown |")
+    println("|---|---|---|---|---|")
+    m = 256
+    nonlinear = (
+        :log => knots_log, :random => knots_random,
+        :two_scale => knots_two_scale, :power2 => knots_power2,
+        :sqrt => knots_sqrt, :plateau => knots_plateau,
+        :bimodal => knots_bimodal,
+    )
+    for (sp_name, sp_fn) in nonlinear
+        for n in (1024, 16_384, 262_144)
+            t = sp_fn(n)
+            q = queries_uniform(t, m)
+            t_exp = bench_batch(ExpFromLeft(), t, q)
+            t_int = bench_batch(InterpolationSearch(), t, q)
+            slowdown = t_int / t_exp
+            @printf(
+                "| %s | %d | %s | %s | %.2fx |\n",
+                sp_name, n, format_ns(t_exp), format_ns(t_int), slowdown
+            )
+        end
+    end
+    return
+end
+
+# Comprehensive validation sweep — many cells with smaller per-cell sample
+# counts. Use this once Auto's thresholds are tuned to check that the
+# heuristic is in fact picking well across the parameter space.
+function sweep_validate()
+    return run_sweep(
+        title = "Validation sweep (many cells)",
+        ns = (16, 64, 256, 1024, 4096, 16_384, 65_536),
+        ms = (1, 4, 16, 64, 256, 1024, 4096),
+        spacings = ALL_KNOT_SPACINGS,
+        query_patterns = ALL_QUERY_PATTERNS,
+        strategies = STRATEGIES,
+    )
+end
+
+function tune_all()
+    sweep_tune_gap_linear_vs_exp()
+    sweep_tune_gap_exp_vs_interp()
+    sweep_tune_n_for_interp()
+    sweep_tune_m_for_interp()
+    sweep_tune_interp_on_nonlinear()
+    return
+end
+
 if abspath(PROGRAM_FILE) == @__FILE__
     mode = get(ENV, "MODE", "fast")
     if mode == "full"
@@ -428,6 +609,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
         sweep_pattern()
     elseif mode == "extreme"
         sweep_extreme()
+    elseif mode == "tune"
+        tune_all()
+    elseif mode == "validate"
+        sweep_validate()
     else
         fast_sweep()
     end

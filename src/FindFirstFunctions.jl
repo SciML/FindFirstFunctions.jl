@@ -354,26 +354,39 @@ const _AUTO_BATCH_LINEAR_GAP = 4
 # beat ExpFromLeft by ~2× on uniformly-spaced data. The sampled-linearity
 # check below is O(1) — 5 fixed probes — so it's cheap enough to run inside
 # Auto when there's a real chance of unlocking InterpolationSearch.
-const _AUTO_INTERP_MIN_GAP = 64
+const _AUTO_INTERP_MIN_GAP = 8
 const _AUTO_INTERP_MIN_N = 1024
 const _AUTO_INTERP_MIN_M = 2
-const _AUTO_LINEAR_REL_TOLERANCE = 0.05
+const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
 
-# Sampled linearity check: probes v[1], v[n/4], v[n/2], v[3n/4], v[n] and
-# tests whether the interior points sit close to the straight line between
-# the endpoints. Cost is ~12 ns regardless of n. Used by Auto to decide
-# whether to gamble on InterpolationSearch.
+# Sampled linearity check: probes v[1], v[k*n/10] for k = 1..9, v[n] and
+# tests whether all interior points sit within `_AUTO_LINEAR_REL_TOLERANCE`
+# (default 0.1%) of the straight line between v[1] and v[n]. The tight
+# tolerance reliably distinguishes truly-uniform data from random/sorted
+# data even at large n (where the order-statistic variance ≈ 1/sqrt(n)
+# would fool a looser check).
+#
+# Cost is ~25 ns regardless of n — 11 reads + 9 comparisons. Used by Auto
+# to decide whether to gamble on InterpolationSearch.
+#
+# InterpolationSearch's downside on non-linear data is large (4-14× slower
+# than ExpFromLeft on log/plateau/two-scale spacings), so we err on the
+# side of rejecting borderline cases. Truly uniform data — exact ranges,
+# evenly-spaced grids, and small-amplitude jittered data — passes; sorted
+# random data is rejected at all `n` tested up to ~10⁶.
 @inline function _sampled_looks_linear(v::AbstractVector{<:Number})
     n = length(v)
-    n < 5 && return true
+    n < 11 && return false
     @inbounds begin
         v1, vn = v[1], v[n]
         span = vn - v1
         (iszero(span) || !isfinite(span)) && return false
-        for k in (n >> 2, n >> 1, (3 * n) >> 2)
-            kk = max(1, min(n, k))
-            expected = v1 + (kk - 1) / (n - 1) * span
-            rel_err = abs(v[kk] - expected) / abs(span)
+        abs_span = abs(span)
+        nm1 = n - 1
+        for k in 1:9
+            kk = 1 + (k * nm1) ÷ 10
+            expected = v1 + (kk - 1) / nm1 * span
+            rel_err = abs(v[kk] - expected) / abs_span
             rel_err > _AUTO_LINEAR_REL_TOLERANCE && return false
         end
     end
@@ -382,6 +395,9 @@ end
 
 # Non-numeric eltype: can't sample, never picks InterpolationSearch.
 @inline _sampled_looks_linear(::AbstractVector) = false
+
+# AbstractRange is definitionally uniform — accept without sampling.
+@inline _sampled_looks_linear(::AbstractRange) = true
 
 # Strategy: BinaryBracket — ignore any hint.
 Base.searchsortedlast(
@@ -649,30 +665,56 @@ end
     if m == 0
         return BinaryBracket()
     end
-    gap = _estimate_avg_gap(v, queries, m)
+    gap, _ = _estimate_avg_gap(v, queries, m)
     return gap <= _AUTO_BATCH_LINEAR_GAP ? LinearScan() : ExpFromLeft()
 end
 
+# Returns `(gap, skewed)`: the estimated average step in `v`'s index space
+# between consecutive query results, plus a flag that's true when the
+# queries' distribution is non-uniform within their span. The skew flag is
+# what lets Auto reject InterpolationSearch even when the gap is large:
+# `ExpFromLeft` from `prev_idx` wins on skewed queries because consecutive
+# queries land in the same neighbourhood, regardless of `v` being linear.
 @inline function _estimate_avg_gap(
         v::AbstractVector{<:Number}, queries::AbstractVector{<:Number}, m::Integer
     )
     n = length(v)
-    n <= 1 && return 0
+    n <= 1 && return (0, false)
     @inbounds span_v = v[end] - v[1]
     if iszero(span_v) || !isfinite(span_v)
-        return n ÷ max(1, m)
+        return (n ÷ max(1, m), false)
     end
     @inbounds span_q = queries[end] - queries[1]
+    # Skew detection on small `m` is too noisy — for `m ≈ 4` random uniform
+    # samples, the median routinely sits 30 %+ off the linear midpoint by
+    # chance. Gate on `m ≥ 10` where the statistical variance is well below
+    # the 20 % threshold.
+    skewed = false
+    if m >= 10
+        @inbounds mid_q = queries[firstindex(queries) + m ÷ 2]
+        @inbounds expected_mid = (
+            queries[firstindex(queries)] +
+                queries[lastindex(queries)]
+        ) / 2
+        if !iszero(span_q) &&
+                abs(mid_q - expected_mid) > 0.2 * abs(span_q)
+            skewed = true
+        end
+    end
+    if skewed
+        return (n ÷ max(1, m), true)
+    end
     ratio = span_q / span_v
     # Clamp ratio: queries may extend outside v's range (extrapolation).
     ratio = clamp(ratio, zero(ratio), one(ratio))
-    return floor(Int, n * ratio / max(1, m))
+    return (floor(Int, n * ratio / max(1, m)), false)
 end
 
-# Non-numeric eltypes: no span subtraction possible, fall back to length ratio.
+# Non-numeric eltypes: no span subtraction possible, fall back to length ratio
+# and assume queries are roughly uniform (no skew detection possible).
 @inline _estimate_avg_gap(
     v::AbstractVector, ::AbstractVector, m::Integer
-) = length(v) ÷ max(1, m)
+) = (length(v) ÷ max(1, m), false)
 
 function Base.searchsortedlast(
         ::Auto, v::AbstractVector, x, hint::Integer;
@@ -851,7 +893,7 @@ function _searchsortedlast_batched!(
     if !issorted(queries; order = order)
         return _searchsortedlast_unsorted_loop!(idx_out, v, queries, order)
     end
-    gap = _estimate_avg_gap(v, queries, m)
+    gap, skewed = _estimate_avg_gap(v, queries, m)
     # Manually dispatch on the picked strategy so each branch is concrete.
     if gap <= _AUTO_BATCH_LINEAR_GAP
         return _searchsortedlast_sorted_loop!(
@@ -859,8 +901,12 @@ function _searchsortedlast_batched!(
         )
     end
     # Sparse-on-large-linear: InterpolationSearch wins ~2× over ExpFromLeft
-    # on uniformly-spaced data. Sampled check is ~12 ns.
-    if gap >= _AUTO_INTERP_MIN_GAP &&
+    # on uniformly-spaced data — but only when queries are *also* spread
+    # roughly uniformly within their span. For skewed (clustered) queries,
+    # `ExpFromLeft` from `prev_idx` wins even on linear v because the next
+    # query's true index is close to the previous one's.
+    if !skewed &&
+            gap >= _AUTO_INTERP_MIN_GAP &&
             length(v) >= _AUTO_INTERP_MIN_N &&
             m >= _AUTO_INTERP_MIN_M &&
             _sampled_looks_linear(v)
@@ -898,13 +944,14 @@ function _searchsortedfirst_batched!(
     if !issorted(queries; order = order)
         return _searchsortedfirst_unsorted_loop!(idx_out, v, queries, order)
     end
-    gap = _estimate_avg_gap(v, queries, m)
+    gap, skewed = _estimate_avg_gap(v, queries, m)
     if gap <= _AUTO_BATCH_LINEAR_GAP
         return _searchsortedfirst_sorted_loop!(
             idx_out, v, queries, LinearScan(), order
         )
     end
-    if gap >= _AUTO_INTERP_MIN_GAP &&
+    if !skewed &&
+            gap >= _AUTO_INTERP_MIN_GAP &&
             length(v) >= _AUTO_INTERP_MIN_N &&
             m >= _AUTO_INTERP_MIN_M &&
             _sampled_looks_linear(v)
