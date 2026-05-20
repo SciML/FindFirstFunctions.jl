@@ -15,7 +15,14 @@ makedocs(
         assets = ["assets/favicon.ico"],
         canonical = "https://docs.sciml.ai/FindFirstFunctions/stable/"
     ),
-    pages = ["index.md"]
+    pages = [
+        "Home" => "index.md",
+        "Interface and extension rules" => "interface.md",
+        "Search strategies" => "strategies.md",
+        "Guessers" => "guessers.md",
+        "Auto: heuristics and benchmarks" => "auto.md",
+        "Equality search" => "equality.md",
+    ]
 )
 
 deploydocs(repo = "github.com/SciML/FindFirstFunctions.jl"; push_preview = true)

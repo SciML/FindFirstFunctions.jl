@@ -1,29 +1,61 @@
 # FindFirstFunctions.jl
 
-FindFirstFunctions.jl is a library for accelerated `findfirst` type functions.
+FindFirstFunctions.jl is a library of accelerated `findfirst`-style and
+sorted-search routines. The package provides:
+
+  - A **strategy-dispatched** sorted-search API: a single pair of
+    `Base.searchsortedfirst` / `Base.searchsortedlast` overloads that take a
+    [`SearchStrategy`](@ref FindFirstFunctions.SearchStrategy) as the first
+    positional argument.
+  - **Batched** in-place lookups
+    [`searchsortedfirst!`](@ref FindFirstFunctions.searchsortedfirst!) /
+    [`searchsortedlast!`](@ref FindFirstFunctions.searchsortedlast!) that pick
+    a strategy automatically.
+  - **Guessers** that supply per-vector hints based on linear extrapolation
+    or a cached previous result.
+  - **Equality search** via [`findfirstequal`](@ref FindFirstFunctions.findfirstequal)
+    and [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal).
 
 ## Installation
-
-To install FindFirstFunctions.jl, use the Julia package manager:
 
 ```julia
 using Pkg
 Pkg.add("FindFirstFunctions")
 ```
 
-## Available Functions
+## Guide
 
-```@docs
-FindFirstFunctions.findfirstequal
-FindFirstFunctions.bracketstrictlymontonic
-FindFirstFunctions.looks_linear
-FindFirstFunctions.Guesser
-FindFirstFunctions.searchsortedfirstcorrelated
-FindFirstFunctions.searchsortedlastcorrelated
-FindFirstFunctions.searchsortedfirstexp
-FindFirstFunctions.searchsortedfirstvec
-FindFirstFunctions.searchsortedlastvec
-FindFirstFunctions.findfirstsortedequal
+  - [Interface and extension rules](@ref) — the public API surface, the
+    contract a `SearchStrategy` subtype must satisfy, and how to add a new
+    one.
+  - [Search strategies](@ref) — catalog of the built-in strategies, when each
+    one is fast, and when it falls back to plain binary search.
+  - [Guessers](@ref) — the [`Guesser`](@ref FindFirstFunctions.Guesser) type
+    and how to plug it into the strategy dispatch via
+    [`GuesserHint`](@ref FindFirstFunctions.GuesserHint).
+  - [Auto: heuristics and benchmarks](@ref) — what
+    [`Auto`](@ref FindFirstFunctions.Auto) picks in every regime, the
+    crossover constants, and the benchmark script that validates them.
+  - [Equality search](@ref) — the dedicated equality routines
+    [`findfirstequal`](@ref FindFirstFunctions.findfirstequal) and
+    [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal),
+    which live outside the strategy framework because their return type is
+    `Union{Int, Nothing}`.
+
+## Quick example
+
+```julia
+using FindFirstFunctions
+
+v = collect(0.0:0.1:10.0)
+queries = sort!(rand(100) .* 10)
+
+# Single query with a hint.
+i = searchsortedlast(BracketGallop(), v, 3.14, 30)
+
+# Batched, with strategy chosen by Auto.
+idx = Vector{Int}(undef, length(queries))
+searchsortedlast!(idx, v, queries)
 ```
 
 ## Contributing
