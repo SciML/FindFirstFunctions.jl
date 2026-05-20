@@ -637,32 +637,123 @@ Base.searchsortedfirst(
 # ===========================================================================
 # Strategy: UniformStep — O(1) direct-arithmetic lookup for AbstractRange.
 #
-# `Base.searchsortedlast(r::AbstractRange, x)` is already implemented as
-# closed-form arithmetic in Base; this strategy delegates to it. The reason
-# `UniformStep` exists as a named strategy is so `Auto` can short-circuit
-# `AbstractRange` inputs to it explicitly, bypassing the gap-estimate and
-# linearity-probe overhead that the general Auto path would otherwise pay.
+# The answer is computed by solving the equation `r[i] = first(r) + (i -
+# firstindex(r)) * step(r)`. For `searchsortedlast`, the answer is the
+# largest `i` with `r[i] <= x` (under `Forward`) or `r[i] >= x` (under
+# `Reverse`); for `searchsortedfirst`, the smallest `i` with the
+# meets-or-passes condition. Either way it's a single floor/ceil + clamp.
 #
-# For non-Range vectors, falls back to `BinaryBracket`. For custom
-# orderings (`By`, `Lt`, …) — also falls back, since the closed-form
-# arithmetic assumes the underlying `<` ordering of `Forward` / `Reverse`.
+# Same formula works for both `Forward` and `Reverse` ordering because
+# `step(r)` carries the direction in its sign — a decreasing range has
+# negative step, which flips the inequality when dividing.
+#
+# For non-Range vectors `step(v)` isn't defined, so the strategy falls
+# back to `BinaryBracket`. For custom orderings (`By`, `Lt`, …) — also
+# falls back, since the closed-form arithmetic assumes the underlying `<`
+# ordering of `Forward` / `Reverse`.
 # ===========================================================================
 
 @inline _uniformstep_supported_order(::Base.Order.ForwardOrdering) = true
 @inline _uniformstep_supported_order(::Base.Order.ReverseOrdering) = true
 @inline _uniformstep_supported_order(::Base.Order.Ordering) = false
 
+# The closed-form formula: `r[i] = first(r) + (i - firstindex(r)) * step(r)`
+# solves for `i` as `firstindex(r) + fld((x - first(r)), step(r))` for
+# `searchsortedlast`. `fld`/`cld` are defined for both integer and
+# floating-point operands, keeping Int operands in exact Int math (matching
+# Base's UnitRange{Int} fast path) while letting Float64 inputs use Float64
+# math directly.
+#
+# Float-eltype ranges (`StepRangeLen`, `LinRange`) suffer from the standard
+# float-roundoff issue: e.g. `5.0 / 0.1 ≈ 49.9999…` so the naive `fld`
+# returns 49 instead of 50. Base's range-aware `searchsortedlast` uses
+# `TwicePrecision` internally to avoid this. We don't want to pay that
+# arithmetic cost; instead we use the naive `fld` as a *rough* estimate
+# and add a one-step correction by checking `r[i+1]` (or `r[i]`) against
+# `x`. The correction is at most one increment in either direction because
+# `fld` rounding error is bounded by one ulp of the divisor — much less
+# than one step of the range.
+@inline function _uniformstep_searchsortedlast(
+        r::AbstractRange, x, order::Base.Order.Ordering,
+    )
+    isempty(r) && return firstindex(r) - 1
+    s = step(r)
+    iszero(s) && return lastindex(r)
+    diff = x - first(r)
+    # Reject non-finite query positions upfront — NaN / Inf would propagate
+    # through fld unpredictably.
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (firstindex(r) - 1) :
+            (diff > 0) ⊻ (s < 0) ? lastindex(r) : firstindex(r) - 1
+    end
+    nm1 = length(r) - 1
+    f = fld(diff, s)
+    # Clamp before the correction step so we don't index off the array.
+    i = if f < 0
+        firstindex(r) - 1
+    elseif f >= nm1
+        lastindex(r)
+    else
+        firstindex(r) + Int(f)
+    end
+    # Roundoff correction: float division can be one ulp off, so the
+    # computed index may be off by one. Compare against `r[i+1]` /
+    # `r[i]` using the order-aware predicate `!lt(order, x, ·)` ("v[·] is
+    # at or below the threshold under this ordering"). At most one
+    # increment in either direction.
+    @inbounds if i < lastindex(r) && !Base.Order.lt(order, x, r[i + 1])
+        return i + 1
+    elseif i >= firstindex(r) && i <= lastindex(r) && Base.Order.lt(order, x, r[i])
+        return i - 1
+    end
+    return i
+end
+
+@inline function _uniformstep_searchsortedfirst(
+        r::AbstractRange, x, order::Base.Order.Ordering,
+    )
+    isempty(r) && return firstindex(r)
+    s = step(r)
+    iszero(s) && return firstindex(r)
+    diff = x - first(r)
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (lastindex(r) + 1) :
+            (diff > 0) ⊻ (s < 0) ? lastindex(r) + 1 : firstindex(r)
+    end
+    nm1 = length(r) - 1
+    f = cld(diff, s)
+    i = if f <= 0
+        firstindex(r)
+    elseif f > nm1
+        lastindex(r) + 1
+    else
+        firstindex(r) + Int(f)
+    end
+    # Roundoff correction. searchsortedfirst's condition is "smallest i
+    # with `!lt(order, r[i], x)`" (`r[i] >= x` under Forward, `r[i] <= x`
+    # under Reverse). If `r[i-1]` already meets the condition the
+    # estimate is too high; if `r[i]` doesn't, the estimate is too low.
+    @inbounds if i > firstindex(r) && i <= lastindex(r) + 1 &&
+            !Base.Order.lt(order, r[i - 1], x)
+        return i - 1
+    end
+    @inbounds if i <= lastindex(r) && Base.Order.lt(order, r[i], x)
+        return i + 1
+    end
+    return i
+end
+
 Base.searchsortedlast(
-    ::UniformStep, v::AbstractRange, x;
+    s::UniformStep, v::AbstractRange, x;
     order::Base.Order.Ordering = Base.Order.Forward,
 ) = _uniformstep_supported_order(order) ?
-    searchsortedlast(v, x, order) :
+    _uniformstep_searchsortedlast(v, x, order) :
     searchsortedlast(BinaryBracket(), v, x; order = order)
 Base.searchsortedfirst(
-    ::UniformStep, v::AbstractRange, x;
+    s::UniformStep, v::AbstractRange, x;
     order::Base.Order.Ordering = Base.Order.Forward,
 ) = _uniformstep_supported_order(order) ?
-    searchsortedfirst(v, x, order) :
+    _uniformstep_searchsortedfirst(v, x, order) :
     searchsortedfirst(BinaryBracket(), v, x; order = order)
 
 # Hinted forms — UniformStep ignores hints (the closed form doesn't need one).
