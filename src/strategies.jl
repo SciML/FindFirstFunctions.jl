@@ -166,6 +166,27 @@ that is supplied.
 struct BinaryBracket <: SearchStrategy end
 
 """
+    UniformStep <: SearchStrategy
+
+O(1) direct-arithmetic lookup for uniformly-spaced vectors. The answer
+index is computed from `(x - first(v)) / step(v)` rather than via binary
+search or galloping — independent of `length(v)`.
+
+Specialized for `AbstractRange{<:Real}` (where `step(v)` is well-defined
+and the spacing is exact). For other vector types, falls back to
+[`BinaryBracket`](@ref). For non-`Forward` / non-`Reverse` orderings,
+also falls back to [`BinaryBracket`](@ref).
+
+Auto automatically dispatches to `UniformStep` when `v isa AbstractRange`,
+so callers passing a range to `searchsortedlast(Auto(), r, x)` get the
+O(1) path with no per-call probe overhead.
+
+Ignores any hint that is supplied — the closed form doesn't benefit from
+a hint.
+"""
+struct UniformStep <: SearchStrategy end
+
+"""
     BisectThenSIMD <: SearchStrategy
 
 Equality-search strategy. Binary-bisects `v` down to a small basecase, then

@@ -635,6 +635,66 @@ Base.searchsortedfirst(
 ) = searchsortedfirst(InterpolationSearch(), v, x; order = order)
 
 # ===========================================================================
+# Strategy: UniformStep — O(1) direct-arithmetic lookup for AbstractRange.
+#
+# `Base.searchsortedlast(r::AbstractRange, x)` is already implemented as
+# closed-form arithmetic in Base; this strategy delegates to it. The reason
+# `UniformStep` exists as a named strategy is so `Auto` can short-circuit
+# `AbstractRange` inputs to it explicitly, bypassing the gap-estimate and
+# linearity-probe overhead that the general Auto path would otherwise pay.
+#
+# For non-Range vectors, falls back to `BinaryBracket`. For custom
+# orderings (`By`, `Lt`, …) — also falls back, since the closed-form
+# arithmetic assumes the underlying `<` ordering of `Forward` / `Reverse`.
+# ===========================================================================
+
+@inline _uniformstep_supported_order(::Base.Order.ForwardOrdering) = true
+@inline _uniformstep_supported_order(::Base.Order.ReverseOrdering) = true
+@inline _uniformstep_supported_order(::Base.Order.Ordering) = false
+
+Base.searchsortedlast(
+    ::UniformStep, v::AbstractRange, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = _uniformstep_supported_order(order) ?
+    searchsortedlast(v, x, order) :
+    searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::UniformStep, v::AbstractRange, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = _uniformstep_supported_order(order) ?
+    searchsortedfirst(v, x, order) :
+    searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Hinted forms — UniformStep ignores hints (the closed form doesn't need one).
+Base.searchsortedlast(
+    s::UniformStep, v::AbstractRange, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedlast(s, v, x; order = order)
+Base.searchsortedfirst(
+    s::UniformStep, v::AbstractRange, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedfirst(s, v, x; order = order)
+
+# Non-Range eltype: fall back to BinaryBracket. UniformStep's closed-form
+# math requires `step(v)` to be exact, which is only true for AbstractRange.
+Base.searchsortedlast(
+    ::UniformStep, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::UniformStep, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+Base.searchsortedlast(
+    ::UniformStep, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::UniformStep, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# ===========================================================================
 # Strategy: BisectThenSIMD — equality-search; positional dispatch falls back
 # to BinaryBracket. (The `findequal(BisectThenSIMD(), v, x)` shortcut lives
 # in `findequal.jl`.)

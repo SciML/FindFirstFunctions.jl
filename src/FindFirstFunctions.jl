@@ -11,7 +11,7 @@ export
     SearchStrategy,
     LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
     InterpolationSearch, BitInterpolationSearch,
-    BinaryBracket, BisectThenSIMD,
+    BinaryBracket, UniformStep, BisectThenSIMD,
     GuesserHint, Auto,
     SearchProperties,
     Guesser, looks_linear,

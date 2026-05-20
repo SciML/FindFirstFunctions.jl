@@ -24,6 +24,7 @@ callers who already know their access pattern and want to pin a strategy.
 | [`InterpolationSearch`](@ref FindFirstFunctions.InterpolationSearch) | `v` is uniformly spaced and numeric | O(1) | O(log n) | no |
 | [`BitInterpolationSearch`](@ref FindFirstFunctions.BitInterpolationSearch) | `DenseVector{Float64}` and log-spaced (geometric) — opt-in, `Auto` does not pick | O(1) | O(log n) | no |
 | [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket) | no hint available, or fallback | O(log n) | O(log n) | no |
+| [`UniformStep`](@ref FindFirstFunctions.UniformStep) | `v isa AbstractRange` (or known-uniformly-spaced) | O(1) | O(1) | no |
 | [`GuesserHint`](@ref FindFirstFunctions.GuesserHint) | repeated correlated lookups against the same `v` | O(1) | ~2 log₂ n | self-provided |
 | [`Auto`](@ref FindFirstFunctions.Auto) | unknown access pattern | varies | varies | yes if supplied |
 
@@ -42,6 +43,7 @@ FindFirstFunctions.InterpolationSearch
 FindFirstFunctions.BitInterpolationSearch
 FindFirstFunctions.BinaryBracket
 FindFirstFunctions.BisectThenSIMD
+FindFirstFunctions.UniformStep
 FindFirstFunctions.Auto
 FindFirstFunctions.SearchProperties
 ```

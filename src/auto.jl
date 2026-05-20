@@ -166,3 +166,28 @@ Base.searchsortedfirst(
     ::Auto, v::AbstractVector, x;
     order::Base.Order.Ordering = Base.Order.Forward,
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# `AbstractRange` short-circuit: closed-form O(1) regardless of hint. Skips
+# the `_auto_pick` linear-vs-bracket decision because `Base.searchsortedlast`
+# on a range is already O(1) — pretending to consult a hint just wastes
+# cycles. Dispatch through `UniformStep` to make the choice explicit.
+function Base.searchsortedlast(
+        ::Auto, v::AbstractRange, x, ::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward,
+    )
+    return searchsortedlast(UniformStep(), v, x; order = order)
+end
+function Base.searchsortedfirst(
+        ::Auto, v::AbstractRange, x, ::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward,
+    )
+    return searchsortedfirst(UniformStep(), v, x; order = order)
+end
+Base.searchsortedlast(
+    ::Auto, v::AbstractRange, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedlast(UniformStep(), v, x; order = order)
+Base.searchsortedfirst(
+    ::Auto, v::AbstractRange, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedfirst(UniformStep(), v, x; order = order)

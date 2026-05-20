@@ -159,6 +159,31 @@ function _searchsortedlast_batched!(
     end
 end
 
+# `AbstractRange` short-circuit: O(1) closed-form per query, no need for
+# strategy heuristics, gap estimation, or linearity probes. Goes straight to
+# `UniformStep` (which delegates to Base's closed-form range overloads).
+function _searchsortedlast_batched!(
+        idx_out, v::AbstractRange, queries::AbstractVector,
+        ::Auto, order::Base.Order.Ordering,
+        ::Union{Nothing, Bool},
+    )
+    @inbounds for k in eachindex(queries)
+        idx_out[k] = searchsortedlast(UniformStep(), v, queries[k]; order = order)
+    end
+    return idx_out
+end
+
+function _searchsortedfirst_batched!(
+        idx_out, v::AbstractRange, queries::AbstractVector,
+        ::Auto, order::Base.Order.Ordering,
+        ::Union{Nothing, Bool},
+    )
+    @inbounds for k in eachindex(queries)
+        idx_out[k] = searchsortedfirst(UniformStep(), v, queries[k]; order = order)
+    end
+    return idx_out
+end
+
 # Specialized batched-Auto: pick an inner strategy from the n/m ratio, then
 # call the sorted loop directly (no duplicate `issorted` check, and each
 # branch is type-stable so the loop specializes on the concrete strategy).
