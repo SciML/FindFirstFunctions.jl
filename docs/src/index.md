@@ -36,6 +36,11 @@ Pkg.add("FindFirstFunctions")
   - [Auto: heuristics and benchmarks](@ref) — what
     [`Auto`](@ref FindFirstFunctions.Auto) picks in every regime, the
     crossover constants, and the benchmark script that validates them.
+  - [Equality search](@ref) — the dedicated equality routines
+    [`findfirstequal`](@ref FindFirstFunctions.findfirstequal) and
+    [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal),
+    which live outside the strategy framework because their return type is
+    `Union{Int, Nothing}`.
 
 ## Quick example
 

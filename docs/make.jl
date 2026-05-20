@@ -21,6 +21,7 @@ makedocs(
         "Search strategies" => "strategies.md",
         "Guessers" => "guessers.md",
         "Auto: heuristics and benchmarks" => "auto.md",
+        "Equality search" => "equality.md",
     ]
 )
 

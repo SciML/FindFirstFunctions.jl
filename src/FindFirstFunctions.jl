@@ -1,97 +1,36 @@
 module FindFirstFunctions
 
+# Public API surface for `using FindFirstFunctions`. The strategy types are
+# zero-field singletons (except `GuesserHint` and `Auto`, which carry small
+# isbits payloads), so exporting them only adds names to the caller's
+# namespace — no runtime cost. `searchsortedfirst!` / `searchsortedlast!`
+# are FFF-defined names (the non-bang `searchsortedfirst` /
+# `searchsortedlast` are extensions of `Base` and are reachable without
+# qualification once `Base` is in scope).
+export
+    SearchStrategy,
+    LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
+    InterpolationSearch, BinaryBracket, BisectThenSIMD,
+    GuesserHint, Auto,
+    SearchProperties,
+    Guesser, looks_linear,
+    searchsortedfirst!, searchsortedlast!,
+    findequal, findfirstequal, findfirstsortedequal
+
 # https://github.com/JuliaLang/julia/pull/53687
 const USE_PTR = VERSION >= v"1.12.0-DEV.255"
-const FFE_IR = """
-declare i8 @llvm.cttz.i8(i8, i1);
-define i64 @entry(i64 %0, $(USE_PTR ? "ptr" : "i64") %1, i64 %2) #0 {
-top:
-  $(USE_PTR ? "" : "%ivars = inttoptr i64 %1 to i64*")
-  %btmp = insertelement <8 x i64> undef, i64 %0, i64 0
-  %var = shufflevector <8 x i64> %btmp, <8 x i64> undef, <8 x i32> zeroinitializer
-  %lenm7 = add nsw i64 %2, -7
-  %dosimditer = icmp ugt i64 %2, 7
-  br i1 %dosimditer, label %L9.lr.ph, label %L32
-
-L9.lr.ph:
-  %len8 = and i64 %2, 9223372036854775800
-  br label %L9
-
-L9:
-  %i = phi i64 [ 0, %L9.lr.ph ], [ %vinc, %L30 ]
-  %ivarsi = getelementptr inbounds i64, $(USE_PTR ? "ptr %1" : "i64* %ivars"), i64 %i
-  $(USE_PTR ? "" : "%vpvi = bitcast i64* %ivarsi to <8 x i64>*")
-  %v = load <8 x i64>, $(USE_PTR ? "ptr %ivarsi" : "<8 x i64> * %vpvi"), align 8
-  %m = icmp eq <8 x i64> %v, %var
-  %mu = bitcast <8 x i1> %m to i8
-  %matchnotfound = icmp eq i8 %mu, 0
-  br i1 %matchnotfound, label %L30, label %L17
-
-L17:
-  %tz8 = call i8 @llvm.cttz.i8(i8 %mu, i1 true)
-  %tz64 = zext i8 %tz8 to i64
-  %vis = add nuw i64 %i, %tz64
-  br label %common.ret
-
-common.ret:
-  %retval = phi i64 [ %vis, %L17 ], [ -1, %L32 ], [ %si, %L51 ], [ -1, %L67 ]
-  ret i64 %retval
-
-L30:
-  %vinc = add nuw nsw i64 %i, 8
-  %continue = icmp slt i64 %vinc, %lenm7
-  br i1 %continue, label %L9, label %L32
-
-L32:
-  %cumi = phi i64 [ 0, %top ], [ %len8, %L30 ]
-  %done = icmp eq i64 %cumi, %2
-  br i1 %done, label %common.ret, label %L51
-
-L51:
-  %si = phi i64 [ %inc, %L67 ], [ %cumi, %L32 ]
-  %spi = getelementptr inbounds i64, $(USE_PTR ? "ptr %1" : "i64* %ivars"), i64 %si
-  %svi = load i64, $(USE_PTR ? "ptr" : "i64*") %spi, align 8
-  %match = icmp eq i64 %svi, %0
-  br i1 %match, label %common.ret, label %L67
-
-L67:
-  %inc = add i64 %si, 1
-  %dobreak = icmp eq i64 %inc, %2
-  br i1 %dobreak, label %common.ret, label %L51
-
-}
-attributes #0 = { alwaysinline }
-"""
-
-function _findfirstequal(vpivot::Int64, ptr::Ptr{Int64}, len::Int64)
-    return Base.llvmcall(
-        (FFE_IR, "entry"),
-        Int64,
-        Tuple{Int64, Ptr{Int64}, Int64},
-        vpivot,
-        ptr,
-        len
-    )
-end
-
-"""
-    findfirstequal(x::Int64,A::DenseVector{Int64})
-
-Finds the first index in `A` where the value equals `x`.
-"""
-findfirstequal(vpivot, ivars) = findfirst(isequal(vpivot), ivars)
-function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
-    GC.@preserve ivars begin
-        ret = _findfirstequal(vpivot, pointer(ivars), length(ivars))
-    end
-    return ret < 0 ? nothing : ret + 1
-end
 
 # Generate the SIMD "find first lane matching predicate" IR for an arbitrary
-# scalar type and LLVM compare predicate. Modelled on `FFE_IR` (the equality
-# scan): load 8 lanes at a time, compare against a broadcast of the search
-# value, bitcast the i1×8 mask to i8, `cttz` to find the first set bit. The
-# tail past the last full chunk is handled scalar-wise.
+# scalar type and LLVM compare predicate. Load 8 lanes at a time, compare
+# against a broadcast of the search value, bitcast the i1×8 mask to i8,
+# `cttz` to find the first set bit. The tail past the last full chunk is
+# handled scalar-wise.
+#
+# Used to back four equality / inequality SIMD primitives:
+#   - `_findfirstequal`        — exact equality, Int64 (predicate `eq`)
+#   - `_simd_first_gt`/`_ge`   — strict / non-strict greater-than, Int64
+#                                 (predicates `sgt` / `sge`)
+#   - same pair for Float64    — predicates `ogt` / `oge` (ordered compares)
 function _simd_scan_ir(t, pred)
     cmp = pred[1] in ('o', 'u') ? "fcmp" : "icmp"
     return """
@@ -156,6 +95,43 @@ function _simd_scan_ir(t, pred)
     """
 end
 
+const FFE_IR = _simd_scan_ir("i64", "eq")
+
+function _findfirstequal(vpivot::Int64, ptr::Ptr{Int64}, len::Int64)
+    return Base.llvmcall(
+        (FFE_IR, "entry"),
+        Int64,
+        Tuple{Int64, Ptr{Int64}, Int64},
+        vpivot,
+        ptr,
+        len
+    )
+end
+
+"""
+    findfirstequal(x, A) -> Union{Int, Nothing}
+
+Find the first index in `A` where the value equals `x`. Returns `nothing`
+if `x` does not occur in `A`.
+
+This function does **not** assume `A` is sorted. For sorted vectors, see
+[`findfirstsortedequal`](@ref) (a bisect-then-SIMD specialization on
+`DenseVector{Int64}`) or [`findequal`](@ref) (the strategy-framework
+equality wrapper that returns an `Int` with a sentinel).
+
+The `(x::Int64, A::DenseVector{Int64})` method uses a custom LLVM IR SIMD
+scan (load 8 lanes, `icmp eq`, `cttz` on the mask) — about 8× faster than
+the scalar `findfirst(==(x), v)` on modern x86-64. Every other element-type
+and array-storage combination falls back to `findfirst(isequal(x), A)`.
+"""
+findfirstequal(vpivot, ivars) = findfirst(isequal(vpivot), ivars)
+function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
+    GC.@preserve ivars begin
+        ret = _findfirstequal(vpivot, pointer(ivars), length(ivars))
+    end
+    return ret < 0 ? nothing : ret + 1
+end
+
 const _SIMD_GT_I64_IR = _simd_scan_ir("i64", "sgt")
 const _SIMD_GE_I64_IR = _simd_scan_ir("i64", "sge")
 const _SIMD_GT_F64_IR = _simd_scan_ir("double", "ogt")
@@ -196,9 +172,21 @@ function _simd_first_ge(x::Float64, ptr::Ptr{Float64}, len::Int64)
 end
 
 """
-findfirstsortedequal(vars::DenseVector{Int64}, var::Int64)::Union{Int64,Nothing}
+    findfirstsortedequal(var::Int64, vars::DenseVector{Int64}) -> Union{Int64, Nothing}
 
-Note that this differs from `searchsortedfirst` by returning `nothing` when absent.
+Find the index of the first occurrence of `var` in the sorted vector
+`vars`. Returns `nothing` if `var` does not occur. Specialized for
+`DenseVector{Int64}` via a branchless binary bisection down to a small
+basecase, followed by the same SIMD equality scan that backs
+[`findfirstequal`](@ref) — faster than plain `findfirst(==(var), vars)`
+or `searchsortedfirst` + post-check for typical Int64 vectors.
+
+The strategy-framework equivalent is
+[`findequal(BisectThenSIMD(), vars, var)`](@ref findequal); that wrapper
+returns an `Int` with a sentinel (`firstindex(v) - 1`) for "not found",
+which is type-stable and composes with the rest of the strategy
+dispatch. Prefer `findequal` for new code; `findfirstsortedequal` remains
+as the dedicated `Union{Int64, Nothing}`-returning name.
 """
 function findfirstsortedequal(
         var::Int64,
@@ -232,7 +220,7 @@ end
 # `BracketGallop` strategy. Not part of the public API in 2.x — use
 # `searchsortedfirst(BracketGallop(), v, x, guess)` /
 # `searchsortedlast(BracketGallop(), v, x, guess)` instead.
-function bracketstrictlymontonic(
+function bracketstrictlymonotonic(
         v::AbstractVector,
         x,
         guess::T,
@@ -267,7 +255,7 @@ function bracketstrictlymontonic(
     return lo, hi
 end
 
-# Internal: companion to `bracketstrictlymontonic` for the `searchsortedfirst`
+# Internal: companion to `bracketstrictlymonotonic` for the `searchsortedfirst`
 # polarity. The original galloping uses `lt(o, x, v[lo])` (i.e., `x < v[lo]`)
 # to choose direction, which is the right test for `searchsortedlast`: when
 # `x == v[lo]`, the answer is `>= lo` so we gallop right. For
@@ -275,7 +263,7 @@ end
 # earlier duplicates) — so we need the inverted polarity `lt(o, v[lo], x)`
 # (i.e., `v[lo] < x`). Without this, BracketGallop.searchsortedfirst returns
 # the wrong index when the hint lands on a run of duplicates.
-function bracketstrictlymontonic_first(
+function bracketstrictlymonotonic_first(
         v::AbstractVector,
         x,
         guess::T,
@@ -501,15 +489,29 @@ SearchProperties() = SearchProperties(false, false, false)
 @inline _has_nan(::AbstractVector) = false
 
 """
-    SearchProperties(v::AbstractVector)
+    SearchProperties(v::AbstractVector; linear_tolerance = 1.0e-3)
 
 Run the linearity probe and (for floating-point eltypes) the NaN scan on `v`,
 returning the populated [`SearchProperties`](@ref). Cost is O(n) on
 floating-point vectors because of the NaN scan; for integer and non-numeric
 eltypes the cost is O(1) — only the sampled-linearity probe runs.
+
+`linear_tolerance` controls the maximum relative deviation accepted by the
+sampled-linearity probe. The default `1e-3` (0.1%) matches `Auto`'s
+un-cached probe behaviour. Loosen it (e.g. to `1e-2`) to accept noisier
+"approximately linear" data — this widens the regime where `Auto` will pick
+`InterpolationSearch` over `ExpFromLeft`. Tighten it (e.g. to `1e-4`) to be
+more conservative.
 """
-function SearchProperties(v::AbstractVector)
-    return SearchProperties(true, _sampled_looks_linear(v), _has_nan(v))
+function SearchProperties(
+        v::AbstractVector;
+        linear_tolerance::Real = 1.0e-3,
+    )
+    return SearchProperties(
+        true,
+        _sampled_looks_linear(v, Float64(linear_tolerance)),
+        _has_nan(v),
+    )
 end
 
 """
@@ -593,7 +595,10 @@ const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
 # side of rejecting borderline cases. Truly uniform data — exact ranges,
 # evenly-spaced grids, and small-amplitude jittered data — passes; sorted
 # random data is rejected at all `n` tested up to ~10⁶.
-@inline function _sampled_looks_linear(v::AbstractVector{<:Number})
+@inline function _sampled_looks_linear(
+        v::AbstractVector{<:Number},
+        tol::Float64 = _AUTO_LINEAR_REL_TOLERANCE,
+    )
     n = length(v)
     n < 11 && return false
     @inbounds begin
@@ -606,17 +611,17 @@ const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
             kk = 1 + (k * nm1) ÷ 10
             expected = v1 + (kk - 1) / nm1 * span
             rel_err = abs(v[kk] - expected) / abs_span
-            rel_err > _AUTO_LINEAR_REL_TOLERANCE && return false
+            rel_err > tol && return false
         end
     end
     return true
 end
 
 # Non-numeric eltype: can't sample, never picks InterpolationSearch.
-@inline _sampled_looks_linear(::AbstractVector) = false
+@inline _sampled_looks_linear(::AbstractVector, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = false
 
 # AbstractRange is definitionally uniform — accept without sampling.
-@inline _sampled_looks_linear(::AbstractRange) = true
+@inline _sampled_looks_linear(::AbstractRange, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = true
 
 # Strategy: BinaryBracket — ignore any hint.
 Base.searchsortedlast(
@@ -802,12 +807,12 @@ Base.searchsortedfirst(
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
-# Strategy: BracketGallop — bracketstrictlymontonic + bounded binary search.
+# Strategy: BracketGallop — bracketstrictlymonotonic + bounded binary search.
 function Base.searchsortedlast(
         ::BracketGallop, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
-    lo, hi = bracketstrictlymontonic(v, x, hint, order)
+    lo, hi = bracketstrictlymonotonic(v, x, hint, order)
     return searchsortedlast(v, x, lo, hi, order)
 end
 
@@ -815,7 +820,7 @@ function Base.searchsortedfirst(
         ::BracketGallop, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
-    lo, hi = bracketstrictlymontonic_first(v, x, hint, order)
+    lo, hi = bracketstrictlymonotonic_first(v, x, hint, order)
     return searchsortedfirst(v, x, lo, hi, order)
 end
 
@@ -1452,13 +1457,21 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    findequal(strategy, v, x[, hint]; order = Base.Order.Forward)
+    findequal(strategy, v, x[, hint]; order = Base.Order.Forward) -> Int
 
-Return the index of `x` in sorted `v` if present, or `firstindex(v) - 1`
-(= 0 for 1-based vectors) if `x` is absent. Type-stable `Int` return — the
-sentinel value `firstindex(v) - 1` matches the convention
-`Base.searchsortedlast` already uses for "x precedes all of v", so callers
-can test for "not found" with `i < firstindex(v)`.
+Return the index of `x` in sorted `v` if present, or the sentinel
+`firstindex(v) - 1` if `x` is absent. Type-stable `Int` return — the
+sentinel matches the convention `Base.searchsortedlast` already uses for
+"x precedes all of v", so callers can test for "not found" with
+`i < firstindex(v)`.
+
+For vectors with 1-based indexing (the Julia default), the sentinel is
+exactly `0`, which is also `searchsortedlast`'s "x precedes all" return.
+For [OffsetArrays](https://github.com/JuliaArrays/OffsetArrays.jl) and any
+other vector whose `firstindex` is not `1`, the sentinel adjusts
+accordingly — e.g. for a vector with `firstindex == -3`, the sentinel is
+`-4`. Always test against `firstindex(v) - 1` (or equivalently
+`i < firstindex(v)`), not against the literal `0`.
 
 Most strategies are handled generically: run
 `searchsortedfirst(strategy, v, x[, hint])` to find the candidate insertion

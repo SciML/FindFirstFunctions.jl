@@ -178,32 +178,10 @@ the benchmark sweep that produced its crossover constants.
 
 ## Equality search
 
-Separate from the sorted-search strategy dispatch, the package exposes two
-specialized equality routines for `Int64` vectors. These find an exact match
-(returning `nothing` if no match exists), so they are not strategies —
-their return semantics differ from `searchsortedfirst`/`searchsortedlast`.
-
-```@docs
-FindFirstFunctions.findfirstequal
-FindFirstFunctions.findfirstsortedequal
-```
-
-`findfirstequal` does an unsorted SIMD scan (~8× faster than scalar
-`findfirst(==(x), v)` for `Int64`). `findfirstsortedequal` does a branchless
-binary bisection down to a small basecase, then dispatches into the same
-SIMD scan. Both are restricted to `DenseVector{Int64}`; for other element
-types `findfirstequal` falls back to `findfirst(==(x), v)`.
-
-For sorted equality search through the strategy framework, prefer
-[`findequal`](@ref FindFirstFunctions.findequal) (see the previous section)
-— it gives a type-stable `Int` return with a sentinel for "not found",
-participates in the strategy dispatch, and short-circuits to
-`findfirstsortedequal`'s SIMD algorithm via the
-[`BisectThenSIMD`](@ref FindFirstFunctions.BisectThenSIMD) strategy when
-the eltype is `Int64`. `findfirstsortedequal` and `findfirstequal` remain
-as backward-compatible dedicated names.
-
-The `findfirstequal` unsorted variant is intentionally outside the strategy
-framework: positional strategies (binary search, galloping, interpolation)
-all require a sorted input, while `findfirstequal` operates on arbitrary
-vectors.
+The package exposes two `Union{Int, Nothing}`-returning equality routines —
+[`findfirstequal`](@ref FindFirstFunctions.findfirstequal) (unsorted SIMD
+scan) and [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal)
+(sorted bisect-then-SIMD scan). They live outside the strategy framework
+because their return semantics differ (`nothing` on miss, vs. in-range
+index for the positional API). See the [Equality search](@ref) page for the
+full documentation.
