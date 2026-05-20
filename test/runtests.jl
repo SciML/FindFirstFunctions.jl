@@ -64,6 +64,103 @@ end
             @test searchsortedlast(GuesserHint(guesser), v1, 42.0) == 1
         end
 
+        @safetestset "Native reverse-order paths (issue #67)" begin
+            using FindFirstFunctions, StableRNGs
+
+            # ExpFromLeft, InterpolationSearch, SIMDLinearScan, and
+            # BitInterpolationSearch all used to fall back to BinaryBracket
+            # for `Base.Order.Reverse`. They now have native Reverse paths;
+            # verify parity vs `Base.searchsorted*(v, x, Reverse)` across
+            # eltypes and hint positions.
+
+            rng = StableRNG(2027)
+            order = Base.Order.Reverse
+
+            @testset "Float64 reverse-sorted parity, m=200" begin
+                # Decreasing sorted Float64 vector.
+                v = sort!(randn(rng, 200); rev = true)
+                for _ in 1:500
+                    x = (rand(rng) - 0.5) * 6
+                    hint = rand(rng, 1:length(v))
+                    expected_last = searchsortedlast(v, x, order)
+                    expected_first = searchsortedfirst(v, x, order)
+                    for strategy in (
+                            BinaryBracket(), LinearScan(), SIMDLinearScan(),
+                            BracketGallop(), ExpFromLeft(),
+                            InterpolationSearch(), BitInterpolationSearch(),
+                            Auto(),
+                        )
+                        @test searchsortedlast(strategy, v, x, hint; order = order) ==
+                            expected_last
+                        @test searchsortedfirst(strategy, v, x, hint; order = order) ==
+                            expected_first
+                    end
+                end
+            end
+
+            @testset "Int64 reverse-sorted parity, m=200" begin
+                v = sort!(rand(rng, Int64(-100):Int64(100), 200); rev = true)
+                for _ in 1:500
+                    x = rand(rng, Int64(-110):Int64(110))
+                    hint = rand(rng, 1:length(v))
+                    expected_last = searchsortedlast(v, x, order)
+                    expected_first = searchsortedfirst(v, x, order)
+                    for strategy in (
+                            BinaryBracket(), LinearScan(), SIMDLinearScan(),
+                            BracketGallop(), ExpFromLeft(),
+                            InterpolationSearch(), Auto(),
+                        )
+                        @test searchsortedlast(strategy, v, x, hint; order = order) ==
+                            expected_last
+                        @test searchsortedfirst(strategy, v, x, hint; order = order) ==
+                            expected_first
+                    end
+                end
+            end
+
+            @testset "BitInterp reverse-sorted positive Float64" begin
+                # Reverse log-spaced — exercises the bit-pattern Reverse path.
+                v = sort!(collect(exp.(range(0.0, log(1.0e6); length = 1024))); rev = true)
+                for _ in 1:200
+                    x = exp(rand(rng) * log(1.0e6))
+                    expected_last = searchsortedlast(v, x, order)
+                    expected_first = searchsortedfirst(v, x, order)
+                    @test searchsortedlast(
+                        BitInterpolationSearch(), v, x; order = order
+                    ) == expected_last
+                    @test searchsortedfirst(
+                        BitInterpolationSearch(), v, x; order = order
+                    ) == expected_first
+                end
+                # Non-positive endpoint falls back to BinaryBracket cleanly.
+                v_signed = sort!(randn(rng, 100); rev = true)
+                for x in (-0.5, 0.0, 0.5, -2.0, 2.0)
+                    @test searchsortedlast(
+                        BitInterpolationSearch(), v_signed, x; order = order
+                    ) == searchsortedlast(v_signed, x, order)
+                end
+            end
+
+            @testset "Edge cases under Reverse" begin
+                # Out-of-range queries: x larger than first, smaller than last.
+                v = collect(10.0:-0.5:1.0)
+                # x > v[1] → searchsortedfirst returns 1, searchsortedlast returns 0.
+                for strategy in (
+                        SIMDLinearScan(), ExpFromLeft(),
+                        InterpolationSearch(), BitInterpolationSearch(),
+                    )
+                    @test searchsortedlast(strategy, v, 100.0, 5; order = order) ==
+                        searchsortedlast(v, 100.0, order)
+                    @test searchsortedlast(strategy, v, -100.0, 5; order = order) ==
+                        searchsortedlast(v, -100.0, order)
+                    @test searchsortedfirst(strategy, v, 100.0, 5; order = order) ==
+                        searchsortedfirst(v, 100.0, order)
+                    @test searchsortedfirst(strategy, v, -100.0, 5; order = order) ==
+                        searchsortedfirst(v, -100.0, order)
+                end
+            end
+        end
+
         @safetestset "Custom ordering for strategy dispatch" begin
             using FindFirstFunctions:
                 Guesser, GuesserHint, BracketGallop, LinearScan,
