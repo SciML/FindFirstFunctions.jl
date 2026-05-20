@@ -548,7 +548,7 @@ end
             # because InterpolationSearch's bad guess just makes BracketGallop
             # wider, never incorrect.
             v_log = exp.(range(0.0, 10.0; length = 4096))
-            lying = SearchProperties(true, true, false, false)
+            lying = SearchProperties(true, true, false, false, false)
             tt_log = sort!(rand(StableRNG(11), 8) .* (v_log[end] - v_log[1]) .+ v_log[1])
             out_lying = Vector{Int}(undef, length(tt_log))
             searchsortedlast!(out_lying, v_log, tt_log; strategy = Auto(lying))
@@ -576,6 +576,18 @@ end
             v_signed = collect(-100.0:0.001:65.0)
             p_signed = SearchProperties(v_signed)
             @test !p_signed.is_log_linear
+
+            # is_uniform: false by default on Vector, true on AbstractRange
+            # (automatic via the AbstractRange constructor).
+            @test !SearchProperties(collect(1:100)).is_uniform
+            @test SearchProperties(1:100).is_uniform
+            @test SearchProperties(0.0:0.1:10.0).is_uniform
+            @test SearchProperties(LinRange(0.0, 10.0, 100)).is_uniform
+            # `is_uniform = true` kwarg on Vector is accepted (currently no
+            # consumer; UniformStep falls back to BinaryBracket on Vector,
+            # so the flag is a forward-compatibility marker for callers).
+            p_uniform = SearchProperties(collect(0.0:0.5:50.0); is_uniform = true)
+            @test p_uniform.is_uniform
         end
 
         @safetestset "Batched in-place searchsorted!" begin

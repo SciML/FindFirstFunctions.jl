@@ -159,31 +159,6 @@ function _searchsortedlast_batched!(
     end
 end
 
-# `AbstractRange` short-circuit: O(1) closed-form per query, no need for
-# strategy heuristics, gap estimation, or linearity probes. Goes straight to
-# `UniformStep` (which delegates to Base's closed-form range overloads).
-function _searchsortedlast_batched!(
-        idx_out, v::AbstractRange, queries::AbstractVector,
-        ::Auto, order::Base.Order.Ordering,
-        ::Union{Nothing, Bool},
-    )
-    @inbounds for k in eachindex(queries)
-        idx_out[k] = searchsortedlast(UniformStep(), v, queries[k]; order = order)
-    end
-    return idx_out
-end
-
-function _searchsortedfirst_batched!(
-        idx_out, v::AbstractRange, queries::AbstractVector,
-        ::Auto, order::Base.Order.Ordering,
-        ::Union{Nothing, Bool},
-    )
-    @inbounds for k in eachindex(queries)
-        idx_out[k] = searchsortedfirst(UniformStep(), v, queries[k]; order = order)
-    end
-    return idx_out
-end
-
 # Specialized batched-Auto: pick an inner strategy from the n/m ratio, then
 # call the sorted loop directly (no duplicate `issorted` check, and each
 # branch is type-stable so the loop specializes on the concrete strategy).
@@ -192,6 +167,17 @@ function _searchsortedlast_batched!(
         s::Auto, order::Base.Order.Ordering,
         queries_sorted::Union{Nothing, Bool},
     )
+    # Uniform-spaced vectors (always true for `AbstractRange`, optionally
+    # for `Vector`s carrying `SearchProperties(v; is_uniform = true)`) go
+    # straight to the closed-form `UniformStep` path — no gap estimation,
+    # no linearity probe, no `issorted` check (uniformly-spaced sorted
+    # data has the same answer regardless of query ordering).
+    if _auto_is_uniform(v, s.props)
+        @inbounds for k in eachindex(queries)
+            idx_out[k] = searchsortedlast(UniformStep(), v, queries[k]; order = order)
+        end
+        return idx_out
+    end
     m = length(queries)
     m == 0 && return idx_out
     # m == 1: skip the issorted + span heuristic — no batched hint is
@@ -262,6 +248,12 @@ function _searchsortedfirst_batched!(
         s::Auto, order::Base.Order.Ordering,
         queries_sorted::Union{Nothing, Bool},
     )
+    if _auto_is_uniform(v, s.props)
+        @inbounds for k in eachindex(queries)
+            idx_out[k] = searchsortedfirst(UniformStep(), v, queries[k]; order = order)
+        end
+        return idx_out
+    end
     m = length(queries)
     m == 0 && return idx_out
     if m == 1

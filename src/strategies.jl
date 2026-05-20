@@ -238,20 +238,30 @@ Default-constructed (`SearchProperties()`) is the "no information" sentinel:
 `Auto`. Construct via `SearchProperties(v::AbstractVector)` to populate the
 fields by running the probes once.
 
-Currently consumed: `is_linear` and `has_nan` (the latter only on Float64,
-to gate `SIMDLinearScan` eligibility in `Auto`). `is_log_linear` is
-populated for callers that want to manually pin
-[`BitInterpolationSearch`](@ref) based on data shape; `Auto` does not
-consume it. The fields are otherwise populated for forward compatibility.
+Currently consumed by `Auto`:
+
+  - `is_linear` — gates `InterpolationSearch` in batched dispatch.
+  - `has_nan` (Float64 only) — gates `SIMDLinearScan` eligibility.
+  - `is_uniform` — short-circuits to [`UniformStep`](@ref) (closed-form
+    O(1) lookup) when set. Automatically `true` for
+    `SearchProperties(::AbstractRange)`; callers with a `Vector` that
+    they know to be exactly uniformly-spaced can construct
+    `SearchProperties(v; is_uniform = true)` to opt into the same fast
+    path.
+
+The `is_log_linear` field is populated for callers that want to manually
+pin [`BitInterpolationSearch`](@ref) based on data shape; `Auto` does not
+consume it. Remaining fields are populated for forward compatibility.
 """
 struct SearchProperties
     has_props::Bool
     is_linear::Bool
     has_nan::Bool
     is_log_linear::Bool
+    is_uniform::Bool
 end
 
-SearchProperties() = SearchProperties(false, false, false, false)
+SearchProperties() = SearchProperties(false, false, false, false, false)
 
 """
     Auto <: SearchStrategy

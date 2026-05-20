@@ -92,7 +92,7 @@ end
 @inline _sampled_looks_log_linear(::AbstractVector, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = false
 
 """
-    SearchProperties(v::AbstractVector; linear_tolerance = 1.0e-3)
+    SearchProperties(v::AbstractVector; linear_tolerance = 1.0e-3, is_uniform = false)
 
 Run the linearity probe and (for floating-point eltypes) the NaN scan on `v`,
 returning the populated [`SearchProperties`](@ref). Cost is O(n) on
@@ -105,9 +105,39 @@ un-cached probe behaviour. Loosen it (e.g. to `1e-2`) to accept noisier
 "approximately linear" data — this widens the regime where `Auto` will pick
 `InterpolationSearch` over `ExpFromLeft`. Tighten it (e.g. to `1e-4`) to be
 more conservative.
+
+`is_uniform` is a caller-supplied flag for `Vector`s that are exactly
+uniformly spaced. Setting it `true` opts the vector into
+[`UniformStep`](@ref)'s closed-form O(1) path via `Auto`. There is no
+detection probe — uniform spacing on a `Vector` can't be confirmed
+cheaply, and an approximate-uniform vector would give wrong answers
+under `UniformStep`'s exact-step assumption. For `AbstractRange` inputs
+the flag is set automatically by the dedicated overload below.
 """
 function SearchProperties(
         v::AbstractVector;
+        linear_tolerance::Real = 1.0e-3,
+        is_uniform::Bool = false,
+    )
+    tol = Float64(linear_tolerance)
+    return SearchProperties(
+        true,
+        _sampled_looks_linear(v, tol),
+        _has_nan(v),
+        _sampled_looks_log_linear(v, tol),
+        is_uniform,
+    )
+end
+
+"""
+    SearchProperties(v::AbstractRange; linear_tolerance = 1.0e-3)
+
+Specialised constructor for `AbstractRange`. Sets `is_uniform = true`
+unconditionally — every `AbstractRange` is by definition uniformly
+spaced, so `Auto` can short-circuit to [`UniformStep`](@ref).
+"""
+function SearchProperties(
+        v::AbstractRange;
         linear_tolerance::Real = 1.0e-3,
     )
     tol = Float64(linear_tolerance)
@@ -116,5 +146,6 @@ function SearchProperties(
         _sampled_looks_linear(v, tol),
         _has_nan(v),
         _sampled_looks_log_linear(v, tol),
+        true,
     )
 end
