@@ -11,19 +11,29 @@ using Pkg
 Pkg.add("FindFirstFunctions")
 ```
 
-## Available Functions
+## Sorted-search API
+
+The public sorted-search surface in 2.x is a single pair of generic functions —
+`Base.searchsortedfirst` and `Base.searchsortedlast` — overloaded to take a
+[`SearchStrategy`](@ref FindFirstFunctions.SearchStrategy) as the first
+positional argument:
+
+```julia
+searchsortedfirst(strategy, v, x[, hint]; order = Base.Order.Forward)
+searchsortedlast(strategy, v, x[, hint]; order = Base.Order.Forward)
+```
+
+For batched lookups, use the in-place [`searchsortedfirst!`](@ref FindFirstFunctions.searchsortedfirst!) /
+[`searchsortedlast!`](@ref FindFirstFunctions.searchsortedlast!) variants.
+They pick a strategy automatically via [`Auto`](@ref FindFirstFunctions.Auto)
+by default, or you can pass `strategy = …` to opt into a specific algorithm.
+
+[`Guesser`](@ref FindFirstFunctions.Guesser) supplies a hint based on either a
+linear-extrapolation lookup (when `v` is roughly evenly spaced) or a cached
+previous result; pass it through [`GuesserHint`](@ref FindFirstFunctions.GuesserHint)
+to use it with the dispatched API.
 
 ```@docs
-FindFirstFunctions.findfirstequal
-FindFirstFunctions.bracketstrictlymontonic
-FindFirstFunctions.looks_linear
-FindFirstFunctions.Guesser
-FindFirstFunctions.searchsortedfirstcorrelated
-FindFirstFunctions.searchsortedlastcorrelated
-FindFirstFunctions.searchsortedfirstexp
-FindFirstFunctions.searchsortedfirstvec
-FindFirstFunctions.searchsortedlastvec
-FindFirstFunctions.findfirstsortedequal
 FindFirstFunctions.searchsortedfirst!
 FindFirstFunctions.searchsortedlast!
 ```
@@ -39,6 +49,20 @@ FindFirstFunctions.InterpolationSearch
 FindFirstFunctions.BinaryBracket
 FindFirstFunctions.GuesserHint
 FindFirstFunctions.Auto
+```
+
+## Hint provider and helpers
+
+```@docs
+FindFirstFunctions.Guesser
+FindFirstFunctions.looks_linear
+```
+
+## Equality search
+
+```@docs
+FindFirstFunctions.findfirstequal
+FindFirstFunctions.findfirstsortedequal
 ```
 
 ## Contributing

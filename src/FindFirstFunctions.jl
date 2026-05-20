@@ -137,25 +137,10 @@ function findfirstsortedequal(
     return ret < 0 ? nothing : ret + offset + 1
 end
 
-"""
-    bracketstrictlymontonic(v, x, guess; lt=<comparison>, by=<transform>, rev=false)
-
-Starting from an initial `guess` index, find indices `(lo, hi)` such that `v[lo] ≤ x ≤ v[hi]` according to the specified order, assuming that `x` is actually within the range of
-values found in `v`.  If `x` is outside that range, either `lo` will be `firstindex(v)` or
-`hi` will be `lastindex(v)`.
-
-Note that the results will not typically satisfy `lo ≤ guess ≤ hi`.  If `x` is precisely
-equal to a value that is not unique in the input `v`, there is no guarantee that `(lo, hi)`
-will encompass *all* indices corresponding to that value.
-
-This algorithm is essentially an expanding binary search, which can be used as a precursor
-to `searchsorted` and related functions, which can take `lo` and `hi` as arguments.  The
-purpose of using this function first would be to accelerate convergence in those functions
-by using correlated `guess`es for repeated calls.  The best `guess` for the next call of
-this function would be the index returned by the previous call to `searchsorted`.
-
-See `Base.sort!` for an explanation of the keyword arguments `by`, `lt` and `rev`.
-"""
+# Internal: expanding-binary-search bracket around a guess. Backs the
+# `BracketGallop` strategy. Not part of the public API in 2.x — use
+# `searchsortedfirst(BracketGallop(), v, x, guess)` /
+# `searchsortedlast(BracketGallop(), v, x, guess)` instead.
 function bracketstrictlymontonic(
         v::AbstractVector,
         x,
@@ -207,9 +192,7 @@ called with a strategy as the first positional argument:
     within a few positions of the hint; degrades linearly otherwise.
   - [`BracketGallop`](@ref) expands an exponential bracket bidirectionally
     from the hint, then binary-searches inside it. Effectively O(1) when the
-    target is near the hint; never worse than ~2 log₂ n comparisons. This is
-    the strategy used by the legacy [`searchsortedfirstcorrelated`](@ref) /
-    [`searchsortedlastcorrelated`](@ref).
+    target is near the hint; never worse than ~2 log₂ n comparisons.
   - [`ExpFromLeft`](@ref) expands rightward from a left-bound hint by
     doubling, then binary-searches inside the final bracket. Best for batched
     sorted queries where each next query's hint is the previous result.
@@ -238,11 +221,11 @@ struct LinearScan <: SearchStrategy end
 """
     BracketGallop <: SearchStrategy
 
-Expand an exponential bracket from the hint using
-[`bracketstrictlymontonic`](@ref), then binary-search inside the bracket. The
-default strategy backing [`searchsortedfirstcorrelated`](@ref) and
-[`searchsortedlastcorrelated`](@ref). Falls back to [`BinaryBracket`](@ref)
-when no hint is supplied.
+Expand an exponential bracket bidirectionally from the hint, then
+binary-search inside the bracket. Effectively O(1) when the target is near
+the hint; never worse than ~2 log₂ n comparisons.
+
+Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
 """
 struct BracketGallop <: SearchStrategy end
 
@@ -256,8 +239,7 @@ center guess, which is what batched sorted-search loops typically want:
 
 Specifically: starting at `lo = hint`, check `v[lo], v[lo+1], ..., v[lo+4]`
 linearly, then `v[lo+8], v[lo+16], …` exponentially, until `x` is bracketed,
-then binary-search inside the bracket. Same algorithm as the standalone
-[`searchsortedfirstexp`](@ref), wrapped here as a dispatchable strategy.
+then binary-search inside the bracket.
 
 Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
 """
@@ -294,11 +276,9 @@ between linear-extrapolation lookup (when `v` looks linear) and using the
 previous result as a guess; this strategy plugs that logic into the strategy
 dispatch hierarchy, and updates `guesser.idx_prev` on each call.
 
-This is the strategy backing the existing
-`searchsortedfirstcorrelated(v, x, ::Guesser)` and
-`searchsortedlastcorrelated(v, x, ::Guesser)` overloads, exposed so it can
-be passed to the batched [`searchsortedlast!`](@ref) / [`searchsortedfirst!`](@ref)
-APIs.
+Use this strategy with the per-query and batched APIs whenever you have a
+`Guesser` attached to a vector. The cost is one `guesser(x)` evaluation
+plus one `BracketGallop` call plus one `idx_prev[]` write per call.
 """
 struct GuesserHint{G} <: SearchStrategy
     guesser::G
@@ -757,9 +737,7 @@ index per element of `queries` into `idx_out` (which must be the same length).
 
 If `queries` is sorted under `order`, the previous result is used as a hint for
 the next query, so the total cost is O(length(v) + length(queries)) under
-`strategy = BracketGallop()` (the default `Auto` choice for non-tiny `v`),
-matching what callers used to hand-roll with `searchsortedlastcorrelated` +
-a manually-maintained `idx` variable.
+`strategy = BracketGallop()` (the default `Auto` choice for non-tiny `v`).
 
 If `queries` is not sorted, falls back to per-element `searchsortedlast` with
 no hint regardless of `strategy`.
@@ -987,11 +965,15 @@ end
 """
     Guesser(v::AbstractVector; looks_linear_threshold = 1e-2)
 
-Wrapper of the searched vector `v` which makes an informed guess
-for `searchsorted*correlated` by either
+Wrapper of the searched vector `v` which makes an informed guess for the next
+correlated lookup by either
 
-  - Exploiting that `v` is sufficiently evenly spaced
-  - Using the previous outcome of `searchsorted*correlated`
+  - exploiting that `v` is sufficiently evenly spaced (linear-extrapolation guess), or
+  - using the previous outcome (the cached `idx_prev`).
+
+Pass a `Guesser` to [`GuesserHint`](@ref) to use it as a search strategy with
+the dispatched [`searchsortedlast`](@ref Base.searchsortedlast) /
+[`searchsortedfirst`](@ref Base.searchsortedfirst) API.
 """
 struct Guesser{T <: AbstractVector}
     v::T
@@ -1028,70 +1010,10 @@ function (g::Guesser)(x)
     end
 end
 
-"""
-    searchsortedfirstcorrelated(v::AbstractVector, x, guess; order=Base.Order.Forward)
-
-An accelerated `findfirst` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
-to start the search from.
-
-The `order` keyword argument specifies the ordering of the vector `v`, defaulting to `Base.Order.Forward`.
-
-Equivalent to `searchsortedfirst(BracketGallop(), v, x, guess; order = order)`.
-"""
-function searchsortedfirstcorrelated(
-        v::AbstractVector,
-        x,
-        guess::T;
-        order::Base.Order.Ordering = Base.Order.Forward
-    ) where {T <: Integer}
-    return searchsortedfirst(BracketGallop(), v, x, guess; order = order)
-end
-
-"""
-    searchsortedlastcorrelated(v::AbstractVector{T}, x, guess; order=Base.Order.Forward)
-
-An accelerated `findlast` on sorted vectors using a bracketed search. Requires a `guess::Union{<:Integer, Guesser}`
-to start the search from.
-
-The `order` keyword argument specifies the ordering of the vector `v`, defaulting to `Base.Order.Forward`.
-
-Equivalent to `searchsortedlast(BracketGallop(), v, x, guess; order = order)`.
-"""
-function searchsortedlastcorrelated(
-        v::AbstractVector,
-        x,
-        guess::T;
-        order::Base.Order.Ordering = Base.Order.Forward
-    ) where {T <: Integer}
-    return searchsortedlast(BracketGallop(), v, x, guess; order = order)
-end
-
-searchsortedfirstcorrelated(r::AbstractRange, x, ::Integer) = searchsortedfirst(r, x)
-searchsortedlastcorrelated(r::AbstractRange, x, ::Integer) = searchsortedlast(r, x)
-
-function searchsortedfirstcorrelated(
-        v::AbstractVector,
-        x,
-        guess::Guesser{T};
-        order::Base.Order.Ordering = Base.Order.Forward
-    ) where {T <: AbstractVector}
-    @assert v === guess.v
-    out = searchsortedfirstcorrelated(v, x, guess(x); order = order)
-    guess.idx_prev[] = out
-    return out
-end
-
-function searchsortedlastcorrelated(
-        v::T,
-        x,
-        guess::Guesser{T};
-        order::Base.Order.Ordering = Base.Order.Forward
-    ) where {T <: AbstractVector}
-    @assert v === guess.v
-    out = searchsortedlastcorrelated(v, x, guess(x); order = order)
-    guess.idx_prev[] = out
-    return out
-end
+# Note on ranges: `Base.searchsortedlast(r::AbstractRange, x, order)` is
+# already O(1) (closed-form), so the strategies' fallback path through
+# `BinaryBracket` (which delegates to that Base method) is already optimal
+# for ranges. No special-case overlays needed.
 
 # GuesserHint methods — strategy dispatch wrapper for the `Guesser`-based
 # correlated search. Per-call cost: one `guesser(x)` evaluation + one
@@ -1126,15 +1048,9 @@ Base.searchsortedfirst(
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(s, v, x; order = order)
 
-"""
-    searchsortedfirstexp(v, x, lo=firstindex(v), hi=lastindex(v))
-
-Find the first index `i` in sorted vector `v` such that `v[i] >= x`, starting from `lo`.
-This uses an exponential search followed by binary search, which is efficient when
-the target is expected to be near `lo` (e.g., for correlated sequential lookups).
-
-Inspired by Interpolations.jl's `searchsortedfirst_exp_left`.
-"""
+# Internal: exponential search forward from `lo`, then bounded binary search.
+# Backs the `ExpFromLeft` strategy. Not part of the public API in 2.x — use
+# `searchsortedfirst(ExpFromLeft(), v, x, lo)` instead.
 Base.@propagate_inbounds function searchsortedfirstexp(
         v::AbstractVector,
         x,
@@ -1162,40 +1078,6 @@ Base.@propagate_inbounds function searchsortedfirstexp(
     return searchsortedfirst(v, x, lo + tn2 - tn2m1, hi, Base.Order.Forward)
 end
 
-"""
-    searchsortedlastvec(v::AbstractVector, x::AbstractVector)
-
-Find the indices for multiple sorted values `x` in sorted vector `v` efficiently.
-If `x` is sorted, this leverages monotonicity to avoid redundant searching.
-Returns indices such that `v[out[i]] <= x[i]` (like `searchsortedlast`).
-
-If `x` is not sorted, falls back to element-wise `searchsortedlast`.
-
-Allocating wrapper around [`searchsortedlast!`](@ref) with the default `Auto`
-strategy. Inspired by Interpolations.jl's `searchsortedfirst_vec`.
-"""
-function searchsortedlastvec(v::AbstractVector, x::AbstractVector)
-    out = Vector{Int}(undef, length(x))
-    return searchsortedlast!(out, v, x)
-end
-
-"""
-    searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
-
-Find the indices for multiple sorted values `x` in sorted vector `v` efficiently.
-If `x` is sorted, this leverages monotonicity to avoid redundant searching.
-Returns indices such that `v[out[i]] >= x[i]` (like `searchsortedfirst`).
-
-If `x` is not sorted, falls back to element-wise `searchsortedfirst`.
-
-Allocating wrapper around [`searchsortedfirst!`](@ref) with the default `Auto`
-strategy. Inspired by Interpolations.jl's `searchsortedfirst_vec`.
-"""
-function searchsortedfirstvec(v::AbstractVector, x::AbstractVector)
-    out = Vector{Int}(undef, length(x))
-    return searchsortedfirst!(out, v, x)
-end
-
 using PrecompileTools: @compile_workload, @setup_workload
 
 @setup_workload begin
@@ -1204,34 +1086,39 @@ using PrecompileTools: @compile_workload, @setup_workload
     linear_vec = collect(1.0:0.5:10.0)
 
     @compile_workload begin
-        # Precompile the most commonly used functions with typical types
+        # Precompile the most commonly used functions with typical types.
 
-        # findfirstequal: fast SIMD-based search in Int64 vectors
+        # findfirstequal: fast SIMD-based search in Int64 vectors.
         findfirstequal(Int64(5), vec_int64)
-        findfirstequal(Int64(100), vec_int64)  # not found case
+        findfirstequal(Int64(100), vec_int64)
 
-        # findfirstsortedequal: binary search in sorted Int64 vectors
+        # findfirstsortedequal: binary search in sorted Int64 vectors.
         findfirstsortedequal(Int64(8), vec_int64)
-        findfirstsortedequal(Int64(100), vec_int64)  # not found case
+        findfirstsortedequal(Int64(100), vec_int64)
 
-        # bracketstrictlymontonic: bracketing for sorted vectors
-        bracketstrictlymontonic(vec_int64, Int64(8), Int64(1), Base.Order.Forward)
-
-        # looks_linear: check if vector is evenly spaced
+        # looks_linear: check if vector is evenly spaced.
         looks_linear(linear_vec)
 
-        # Guesser: wrapper for efficient repeated searches
+        # Guesser: hint provider for correlated repeated searches.
         guesser = Guesser(linear_vec)
         guesser(5.0)
 
-        # searchsortedfirstcorrelated and searchsortedlastcorrelated
-        searchsortedfirstcorrelated(vec_int64, Int64(8), Int64(1))
-        searchsortedlastcorrelated(vec_int64, Int64(8), Int64(1))
+        # Strategy dispatch — single-query forms across the standard strategies.
+        for strategy in (
+                LinearScan(), BracketGallop(), ExpFromLeft(),
+                InterpolationSearch(), BinaryBracket(), Auto(),
+            )
+            searchsortedfirst(strategy, vec_int64, Int64(8), Int64(1))
+            searchsortedlast(strategy, vec_int64, Int64(8), Int64(1))
+        end
+        searchsortedfirst(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
+        searchsortedlast(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
 
-        # Also precompile with Guesser
-        guesser_int = Guesser(vec_int64)
-        searchsortedfirstcorrelated(vec_int64, Int64(8), guesser_int)
-        searchsortedlastcorrelated(vec_int64, Int64(8), guesser_int)
+        # Strategy dispatch — batched in-place forms.
+        idx_out = Vector{Int}(undef, 4)
+        queries = Int64[2, 5, 8, 12]
+        searchsortedfirst!(idx_out, vec_int64, queries)
+        searchsortedlast!(idx_out, vec_int64, queries)
     end
 end
 
