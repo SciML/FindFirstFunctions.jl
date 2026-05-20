@@ -535,6 +535,119 @@ end
                 ) == searchsortedlast(v_rev, Int64(50), Base.Order.Reverse)
             end
         end
+
+        @safetestset "findequal + BisectThenSIMD" begin
+            using FindFirstFunctions, StableRNGs
+            F = FindFirstFunctions
+
+            # Reference: an Int sentinel-returning equality search built from
+            # Base.searchsortedfirst.
+            function ref_findequal(v, x)
+                i = searchsortedfirst(v, x)
+                return (i > lastindex(v) || !isequal(v[i], x)) ?
+                    (firstindex(v) - 1) : i
+            end
+
+            @testset "Strategy parity on Int64 (1-based)" begin
+                rng = StableRNG(3001)
+                for _ in 1:2_000
+                    n = rand(rng, 1:256)
+                    v = sort!(rand(rng, Int64(-50):Int64(50), n))
+                    x = rand(rng, Int64(-60):Int64(60))
+                    hint = rand(rng, 1:n)
+                    want = ref_findequal(v, x)
+                    for strategy in (
+                            F.BinaryBracket(), F.BracketGallop(),
+                            F.SIMDLinearScan(), F.LinearScan(),
+                            F.ExpFromLeft(), F.InterpolationSearch(),
+                            F.Auto(), F.BisectThenSIMD(),
+                        )
+                        @test F.findequal(strategy, v, x) == want
+                        @test F.findequal(strategy, v, x, hint) == want
+                    end
+                end
+            end
+
+            @testset "Strategy parity on Float64" begin
+                rng = StableRNG(3002)
+                for _ in 1:500
+                    n = rand(rng, 1:256)
+                    v = sort!(randn(rng, n))
+                    # Mix queries that hit elements with ones that don't.
+                    x = rand(rng) < 0.4 ? v[rand(rng, 1:n)] :
+                        (rand(rng) - 0.5) * 6
+                    hint = rand(rng, 1:n)
+                    want = ref_findequal(v, x)
+                    for strategy in (
+                            F.BinaryBracket(), F.BracketGallop(),
+                            F.SIMDLinearScan(), F.Auto(), F.BisectThenSIMD(),
+                        )
+                        @test F.findequal(strategy, v, x) == want
+                        @test F.findequal(strategy, v, x, hint) == want
+                    end
+                end
+            end
+
+            @testset "BisectThenSIMD shortcut uses SIMD on DenseVector{Int64}" begin
+                # Compare against findfirstsortedequal directly.
+                v = collect(Int64, 1:10_000)
+                for x in (
+                        Int64(1), Int64(5_000), Int64(10_000),
+                        Int64(0), Int64(10_001), Int64(-100), Int64(20_000),
+                    )
+                    a = F.findequal(F.BisectThenSIMD(), v, x)
+                    b = F.findfirstsortedequal(x, v)
+                    @test (a == 0 ? nothing : a) == b
+                end
+            end
+
+            @testset "Sentinel for OffsetArray-style indexing" begin
+                # Manually shift the index base by using a UnitRange directly.
+                v = collect(Int64, 10:20)
+                @test F.findequal(F.Auto(), v, Int64(15)) == 6
+                @test F.findequal(F.Auto(), v, Int64(100)) == 0
+                @test F.findequal(F.Auto(), v, Int64(-5)) == 0
+            end
+
+            @testset "Reverse ordering" begin
+                v_rev = collect(Int64, 10:-1:1)
+                # Forward findequal on a reverse-sorted vector with the
+                # Reverse ordering should still find the element if present.
+                @test F.findequal(
+                    F.BinaryBracket(), v_rev, Int64(5);
+                    order = Base.Order.Reverse,
+                ) == 6
+                @test F.findequal(
+                    F.BinaryBracket(), v_rev, Int64(99);
+                    order = Base.Order.Reverse,
+                ) == 0
+                # BisectThenSIMD on reverse order falls back to generic path.
+                @test F.findequal(
+                    F.BisectThenSIMD(), v_rev, Int64(5);
+                    order = Base.Order.Reverse,
+                ) == 6
+            end
+
+            @testset "Empty and single-element" begin
+                vempty = Int64[]
+                @test F.findequal(F.Auto(), vempty, Int64(0)) == 0
+                @test F.findequal(F.BisectThenSIMD(), vempty, Int64(0)) == 0
+                v1 = Int64[42]
+                @test F.findequal(F.Auto(), v1, Int64(42)) == 1
+                @test F.findequal(F.Auto(), v1, Int64(7)) == 0
+                @test F.findequal(F.BisectThenSIMD(), v1, Int64(42)) == 1
+            end
+
+            @testset "BisectThenSIMD in positional dispatch falls back" begin
+                # When used with searchsortedfirst/last, BisectThenSIMD just
+                # delegates to BinaryBracket — its purpose is findequal.
+                v = collect(Int64, 1:100)
+                @test searchsortedfirst(F.BisectThenSIMD(), v, Int64(50)) ==
+                    searchsortedfirst(v, Int64(50))
+                @test searchsortedlast(F.BisectThenSIMD(), v, Int64(50)) ==
+                    searchsortedlast(v, Int64(50))
+            end
+        end
     end
 
     if GROUP == "QA"

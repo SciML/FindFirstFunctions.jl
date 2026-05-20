@@ -208,40 +208,23 @@ function findfirstsortedequal(
     len = length(vars)
     offset = 0
     @inbounds while len > basecase
-        half = len >>> 1 # half on left, len - half on right
-        if Base.libllvm_version >= v"17"
-            # TODO: check if this works
-            # I'm worried the `!unpredictable` metadata will be stripped
-            offset = Base.llvmcall(
-                (
-                    """
-                                         define i64 @entry(i8 %0, i64 %1, i64 %2) #0 {
-                                         top:
-                                             %b = trunc i8 %0 to i1
-                                             %s = select i1 %b, i64 %1, i64 %2, !unpredictable !0
-                                             ret i64 %s
-                                         }
-                                         attributes #0 = { alwaysinline }
-                                         !0 = !{}
-                    """,
-                    "entry",
-                ),
-                Int64,
-                Tuple{Bool, Int64, Int64},
-                vars[offset + half + 1] <= var,
-                half + offset,
-                offset
-            )
-        else
-            offset = ifelse(vars[offset + half + 1] <= var, half + offset, offset)
-        end
-        len = len - half
+        # Bisect with the predicate `vars[mid] < var` (strict). When true,
+        # `var` is past the midpoint — drop the left half *and* the
+        # midpoint itself. When false (`vars[mid] >= var`), `var` may be
+        # at the midpoint, so keep `offset` and shrink the window to
+        # `vars[offset+1 .. offset+half+1]` (inclusive of the midpoint).
+        # The earlier `<=` predicate would have advanced past matching
+        # midpoints, masking earlier duplicates of `var`.
+        half = len >>> 1
+        mid = offset + half + 1
+        is_left_strictly_less = vars[mid] < var
+        offset = ifelse(is_left_strictly_less, offset + half + 1, offset)
+        len = ifelse(is_left_strictly_less, len - half - 1, half + 1)
     end
     # maybe occurs in vars[offset+1:offset+len]
     GC.@preserve vars begin
         ret = _findfirstequal(var, pointer(vars) + 8offset, len)
     end
-    # return ret
     return ret < 0 ? nothing : ret + offset + 1
 end
 
@@ -284,6 +267,44 @@ function bracketstrictlymontonic(
     return lo, hi
 end
 
+# Internal: companion to `bracketstrictlymontonic` for the `searchsortedfirst`
+# polarity. The original galloping uses `lt(o, x, v[lo])` (i.e., `x < v[lo]`)
+# to choose direction, which is the right test for `searchsortedlast`: when
+# `x == v[lo]`, the answer is `>= lo` so we gallop right. For
+# `searchsortedfirst`, when `x == v[lo]` the answer is `<= lo` (look for
+# earlier duplicates) — so we need the inverted polarity `lt(o, v[lo], x)`
+# (i.e., `v[lo] < x`). Without this, BracketGallop.searchsortedfirst returns
+# the wrong index when the hint lands on a run of duplicates.
+function bracketstrictlymontonic_first(
+        v::AbstractVector,
+        x,
+        guess::T,
+        o::Base.Order.Ordering
+    )::NTuple{2, keytype(v)} where {T <: Integer}
+    bottom = firstindex(v)
+    top = lastindex(v)
+    if guess < bottom || guess > top
+        return bottom, top
+    else
+        u = T(1)
+        lo, hi = guess, min(guess + u, top)
+        @inbounds if !Base.Order.lt(o, v[lo], x)
+            # v[lo] >= x → answer is <= lo, gallop left.
+            while lo > bottom && !Base.Order.lt(o, v[lo], x)
+                lo, hi = max(bottom, lo - u), lo
+                u += u
+            end
+        else
+            # v[lo] < x → answer is > lo, gallop right.
+            while hi < top && Base.Order.lt(o, v[hi], x)
+                lo, hi = hi, min(top, hi + u)
+                u += u
+            end
+        end
+    end
+    return lo, hi
+end
+
 # ---------------------------------------------------------------------------
 # Sorted-search strategies
 # ---------------------------------------------------------------------------
@@ -313,6 +334,10 @@ called with a strategy as the first positional argument:
     irregular data.
   - [`BinaryBracket`](@ref) is the standard `Base.searchsortedlast` /
     `Base.searchsortedfirst` with no hint. Use it when no useful hint exists.
+  - [`BisectThenSIMD`](@ref) is an equality-search strategy: binary-bisects
+    `v` to a small basecase, then SIMD-scans for exact equality. Specialised
+    for `DenseVector{Int64}`; only meaningful when used with
+    [`findequal`](@ref).
   - [`Auto`](@ref) heuristically picks one of the above based on the size of
     `v`, the spacing of `v`, and whether a hint was supplied. Accepts an
     optional [`SearchProperties`](@ref) cache to skip per-call probes.
@@ -405,6 +430,28 @@ Plain `Base.searchsortedlast` / `Base.searchsortedfirst`. Ignores any hint
 that is supplied.
 """
 struct BinaryBracket <: SearchStrategy end
+
+"""
+    BisectThenSIMD <: SearchStrategy
+
+Equality-search strategy. Binary-bisects `v` down to a small basecase, then
+SIMD-scans the basecase for exact equality with `x`. Specialised for
+`DenseVector{Int64}` + `Int64` queries via the same custom LLVM IR that
+backs [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal);
+for other element types, falls back to [`BinaryBracket`](@ref) plus an
+equality check.
+
+This strategy is meant for use with [`findequal`](@ref FindFirstFunctions.findequal),
+not with `searchsortedfirst` / `searchsortedlast` — its purpose is to answer
+"is `x` present at exactly which index, or not at all?", which is a
+different question from positional search. In the
+`searchsortedfirst`/`searchsortedlast` dispatch it falls back to
+[`BinaryBracket`](@ref).
+
+Ignores any hint that is supplied. Falls back to [`BinaryBracket`](@ref) for
+non-`Forward` orderings.
+"""
+struct BisectThenSIMD <: SearchStrategy end
 
 """
     GuesserHint(guesser::Guesser) <: SearchStrategy
@@ -768,7 +815,7 @@ function Base.searchsortedfirst(
         ::BracketGallop, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
-    lo, hi = bracketstrictlymontonic(v, x, hint, order)
+    lo, hi = bracketstrictlymontonic_first(v, x, hint, order)
     return searchsortedfirst(v, x, lo, hi, order)
 end
 
@@ -799,8 +846,12 @@ function Base.searchsortedfirst(
         return lo
     end
     h = clamp(hint, lo, hi)
-    @inbounds if Base.Order.lt(order, x, v[h])
-        # x < v[hint] → hint is past the answer; full search.
+    # `searchsortedfirst` semantics: smallest i with v[i] >= x. We can only
+    # gallop forward from `h` when v[h] < x (then the answer is strictly
+    # > h). When v[h] >= x, the first occurrence of `x` may be at index
+    # ≤ h (duplicates to the left), so fall back to a full search rather
+    # than risk skipping past earlier duplicates.
+    @inbounds if !Base.Order.lt(order, v[h], x)
         return searchsortedfirst(v, x, order)
     end
     return order === Base.Order.Forward ?
@@ -910,6 +961,27 @@ Base.searchsortedlast(
 ) = searchsortedlast(BinaryBracket(), v, x; order = order)
 Base.searchsortedfirst(
     s::InterpolationSearch, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Strategy: BisectThenSIMD — only meaningful for `findequal`. For the
+# positional `searchsortedfirst` / `searchsortedlast` dispatch, fall back to
+# BinaryBracket — bisect-then-equality-scan can't answer the positional
+# question ("where would x insert?") that searchsortedfirst asks.
+Base.searchsortedlast(
+    ::BisectThenSIMD, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::BisectThenSIMD, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+Base.searchsortedlast(
+    s::BisectThenSIMD, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    s::BisectThenSIMD, v::AbstractVector, x, ::Integer;
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
@@ -1375,6 +1447,87 @@ Base.@propagate_inbounds function searchsortedfirstexp(
     return searchsortedfirst(v, x, lo + tn2 - tn2m1, hi, Base.Order.Forward)
 end
 
+# ---------------------------------------------------------------------------
+# Equality search through the strategy dispatch
+# ---------------------------------------------------------------------------
+
+"""
+    findequal(strategy, v, x[, hint]; order = Base.Order.Forward)
+
+Return the index of `x` in sorted `v` if present, or `firstindex(v) - 1`
+(= 0 for 1-based vectors) if `x` is absent. Type-stable `Int` return — the
+sentinel value `firstindex(v) - 1` matches the convention
+`Base.searchsortedlast` already uses for "x precedes all of v", so callers
+can test for "not found" with `i < firstindex(v)`.
+
+Most strategies are handled generically: run
+`searchsortedfirst(strategy, v, x[, hint])` to find the candidate insertion
+point, then check whether `v[i]` actually equals `x`. The shortcut method
+on [`BisectThenSIMD`](@ref) for `DenseVector{Int64}` skips the
+`searchsortedfirst` path entirely and uses the dedicated bisect-then-SIMD
+equality scan that backs [`findfirstsortedequal`](@ref).
+
+For unsorted vectors, use [`findfirstequal`](@ref) — it does not require
+a sorted input and falls outside the strategy framework.
+"""
+@inline function findequal(
+        strategy::SearchStrategy, v::AbstractVector, x;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    return _findequal_generic(strategy, v, x, order)
+end
+
+@inline function findequal(
+        strategy::SearchStrategy, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    i = searchsortedfirst(strategy, v, x, hint; order = order)
+    return _findequal_postcheck(v, x, i)
+end
+
+@inline function _findequal_generic(strategy, v, x, order)
+    i = searchsortedfirst(strategy, v, x; order = order)
+    return _findequal_postcheck(v, x, i)
+end
+
+@inline function _findequal_postcheck(v::AbstractVector, x, i::Integer)
+    if i > lastindex(v)
+        return firstindex(v) - 1
+    end
+    @inbounds return isequal(v[i], x) ? Int(i) : (firstindex(v) - 1)
+end
+
+# Shortcut: BisectThenSIMD on DenseVector{Int64} uses the dedicated bisect-
+# then-SIMD equality scan (same algorithm as `findfirstsortedequal`).
+function findequal(
+        ::BisectThenSIMD, v::DenseVector{Int64}, x::Int64;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if order !== Base.Order.Forward
+        return _findequal_generic(BinaryBracket(), v, x, order)
+    end
+    r = findfirstsortedequal(x, v)
+    return r === nothing ? (firstindex(v) - 1) : r
+end
+# Hinted form ignores the hint — the bisect-then-SIMD algorithm does not
+# benefit from a hint, and probing it would only waste cycles.
+findequal(
+    s::BisectThenSIMD, v::DenseVector{Int64}, x::Int64, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = findequal(s, v, x; order = order)
+
+# Non-Int64 fallback for BisectThenSIMD: use BinaryBracket + post-check.
+function findequal(
+        ::BisectThenSIMD, v::AbstractVector, x;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    return _findequal_generic(BinaryBracket(), v, x, order)
+end
+findequal(
+    s::BisectThenSIMD, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = findequal(s, v, x; order = order)
+
 using PrecompileTools: @compile_workload, @setup_workload
 
 @setup_workload begin
@@ -1408,6 +1561,14 @@ using PrecompileTools: @compile_workload, @setup_workload
             )
             searchsortedfirst(strategy, vec_int64, Int64(8), Int64(1))
             searchsortedlast(strategy, vec_int64, Int64(8), Int64(1))
+        end
+        # findequal: generic + BisectThenSIMD shortcut for Int64 dense vectors.
+        for strategy in (
+                BinaryBracket(), BracketGallop(), SIMDLinearScan(),
+                BisectThenSIMD(), Auto(),
+            )
+            findequal(strategy, vec_int64, Int64(8))
+            findequal(strategy, vec_int64, Int64(8), Int64(1))
         end
         # SIMDLinearScan's Float64 specialization.
         let vec_f64 = collect(1.0:1.0:16.0)

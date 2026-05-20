@@ -39,9 +39,35 @@ FindFirstFunctions.BracketGallop
 FindFirstFunctions.ExpFromLeft
 FindFirstFunctions.InterpolationSearch
 FindFirstFunctions.BinaryBracket
+FindFirstFunctions.BisectThenSIMD
 FindFirstFunctions.Auto
 FindFirstFunctions.SearchProperties
 ```
+
+## Equality search through the strategy framework
+
+Strategies answer positional questions ("where would `x` insert?"). Equality
+asks a different question ("is `x` at exactly which index?"). The
+[`findequal`](@ref FindFirstFunctions.findequal) wrapper builds the latter
+on top of the former: every strategy gets an equality variant for free.
+
+```@docs
+FindFirstFunctions.findequal
+```
+
+The sentinel for "not found" is `firstindex(v) - 1` (`= 0` for 1-based
+vectors). Type-stable `Int` return, no `Union` with `Nothing`. Callers can
+test for absence with `i < firstindex(v)`.
+
+`findequal` routes most strategies through `searchsortedfirst + post-check`
+generically, so `findequal(BracketGallop(), v, x, hint)`,
+`findequal(SIMDLinearScan(), v, x, hint)`,
+`findequal(GuesserHint(g), v, x)`, etc. all just work.
+
+The [`BisectThenSIMD`](@ref FindFirstFunctions.BisectThenSIMD) strategy
+short-circuits the post-check path on `DenseVector{Int64}` by dispatching
+into [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal)
+directly — same custom LLVM IR scan, exposed through the strategy framework.
 
 `GuesserHint` is documented on the [Guessers](@ref) page.
 
@@ -168,10 +194,16 @@ binary bisection down to a small basecase, then dispatches into the same
 SIMD scan. Both are restricted to `DenseVector{Int64}`; for other element
 types `findfirstequal` falls back to `findfirst(==(x), v)`.
 
-The same SIMD-scan scaffolding (load 8 lanes, vector compare, `cttz` on the
-bitmask) also backs [`SIMDLinearScan`](@ref FindFirstFunctions.SIMDLinearScan)
-on the positional-search side — see the strategy notes above. The two paths
-remain separate APIs because their return semantics differ (`nothing` vs.
-in-range index) and because the equality-scan extension to `Float64` would
-require additional NaN-handling that the positional API already handles via
-ordered float compares.
+For sorted equality search through the strategy framework, prefer
+[`findequal`](@ref FindFirstFunctions.findequal) (see the previous section)
+— it gives a type-stable `Int` return with a sentinel for "not found",
+participates in the strategy dispatch, and short-circuits to
+`findfirstsortedequal`'s SIMD algorithm via the
+[`BisectThenSIMD`](@ref FindFirstFunctions.BisectThenSIMD) strategy when
+the eltype is `Int64`. `findfirstsortedequal` and `findfirstequal` remain
+as backward-compatible dedicated names.
+
+The `findfirstequal` unsorted variant is intentionally outside the strategy
+framework: positional strategies (binary search, galloping, interpolation)
+all require a sorted input, while `findfirstequal` operates on arbitrary
+vectors.
