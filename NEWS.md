@@ -381,6 +381,32 @@ with an analysis helper at `bench/analyze.jl`. See `auto.md` for the
 decision tree, the per-regime winner distribution, and how to run the
 sweep locally.
 
+### Investigated but rejected: BitInterpolationSearch for log-spaced data
+
+A natural extension to `InterpolationSearch` was investigated: reinterpret a
+positive `DenseVector{Float64}` as `DenseVector{UInt64}`, then run the
+linear-extrapolation guess on the IEEE bit pattern. The hypothesis was that
+bit-pattern interpolation should beat `InterpolationSearch` on log-spaced
+(geometric) data — bit patterns are approximately linear in array index for
+log-spaced floats, since the IEEE binary exponent occupies the high bits.
+
+The strategy was implemented, correctness-verified against `Base`, and
+benchmarked against `InterpolationSearch` / `BracketGallop` / `ExpFromLeft`
+/ `SIMDLinearScan` / `Auto` across `m` ∈ {4, 16, 64, 256, 1024, 4096} on a
+`n = 65536` log-spaced Float64 vector with sparse queries. The result was
+that `BitInterpolationSearch` lost to every alternative at every `m`,
+clocking 65–88 ns/q while `ExpFromLeft` ran at 19–41 ns/q and
+`SIMDLinearScan` at 16–199 ns/q. The per-query division and floating-point
+arithmetic in the bit-domain guess cost more than the saved bracket
+refinement on log-spaced data, and the same overhead made the strategy
+strictly worse than plain `InterpolationSearch` on uniform-spaced data
+(where the bit pattern isn't linear in index in the first place — the
+denormal-to-normalized transition introduces a huge non-linearity at zero).
+
+The strategy was not retained. `Auto` already serves log-spaced data well
+via `SIMDLinearScan` (medium gap) and `BracketGallop` / `ExpFromLeft`
+(large gap); no new dispatch path is needed.
+
 ### Cleanup: typo fix, FFE_IR unification, tolerance kwarg
 
   - Internal helper `bracketstrictlymontonic` renamed to
