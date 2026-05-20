@@ -296,6 +296,66 @@ end
             @test outs == searchsortedlast.(Ref(vs), qs)
         end
 
+        @safetestset "SearchProperties cache" begin
+            using FindFirstFunctions:
+                Auto, SearchProperties, searchsortedlast!, searchsortedfirst!
+            using StableRNGs
+
+            # The sentinel struct.
+            @test !SearchProperties().has_props
+
+            # A populated SearchProperties from a linear, NaN-free vector.
+            v = collect(0.0:0.001:100.0)
+            props = SearchProperties(v)
+            @test props.has_props
+            @test props.is_linear
+            @test !props.has_nan
+
+            # Output equivalence: Auto(props) returns the same answers as Auto()
+            # on a sparse-on-long-linear regime (where InterpolationSearch is
+            # the picked strategy via the cached `is_linear`).
+            tt = sort!(rand(StableRNG(10), 16) .* 100.0)
+            out_cached = Vector{Int}(undef, length(tt))
+            out_baseline = Vector{Int}(undef, length(tt))
+            out_truth = searchsortedlast.(Ref(v), tt)
+            searchsortedlast!(out_cached, v, tt; strategy = Auto(props))
+            searchsortedlast!(out_baseline, v, tt; strategy = Auto())
+            @test out_cached == out_truth
+            @test out_baseline == out_truth
+
+            # searchsortedfirst path takes the same branch.
+            searchsortedfirst!(out_cached, v, tt; strategy = Auto(props))
+            searchsortedfirst!(out_baseline, v, tt; strategy = Auto())
+            @test out_cached == searchsortedfirst.(Ref(v), tt)
+            @test out_baseline == searchsortedfirst.(Ref(v), tt)
+
+            # Float vector with a NaN: props.has_nan is true. The cache
+            # currently isn't consumed for has_nan in Auto's decision tree,
+            # but the field is populated correctly.
+            vnan = [1.0, 2.0, NaN, 4.0, 5.0]
+            propsnan = SearchProperties(vnan)
+            @test propsnan.has_nan
+
+            # Non-float eltype: has_nan is always false.
+            vi = collect(Int64, 1:100)
+            @test !SearchProperties(vi).has_nan
+
+            # Lying SearchProperties (claims is_linear=true on non-linear data)
+            # is still correctness-preserving — Auto's "InterpolationSearch on
+            # linear data" branch handles the false positive gracefully
+            # because InterpolationSearch's bad guess just makes BracketGallop
+            # wider, never incorrect.
+            v_log = exp.(range(0.0, 10.0; length = 4096))
+            lying = SearchProperties(true, true, false)
+            tt_log = sort!(rand(StableRNG(11), 8) .* (v_log[end] - v_log[1]) .+ v_log[1])
+            out_lying = Vector{Int}(undef, length(tt_log))
+            searchsortedlast!(out_lying, v_log, tt_log; strategy = Auto(lying))
+            @test out_lying == searchsortedlast.(Ref(v_log), tt_log)
+
+            # Bits-ness: SearchProperties must be isbits so it doesn't allocate.
+            @test isbitstype(SearchProperties)
+        end
+
         @safetestset "Batched in-place searchsorted!" begin
             using FindFirstFunctions:
                 LinearScan, BracketGallop, BinaryBracket, Auto,

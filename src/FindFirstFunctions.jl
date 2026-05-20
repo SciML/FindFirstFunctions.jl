@@ -314,7 +314,8 @@ called with a strategy as the first positional argument:
   - [`BinaryBracket`](@ref) is the standard `Base.searchsortedlast` /
     `Base.searchsortedfirst` with no hint. Use it when no useful hint exists.
   - [`Auto`](@ref) heuristically picks one of the above based on the size of
-    `v`, the spacing of `v`, and whether a hint was supplied.
+    `v`, the spacing of `v`, and whether a hint was supplied. Accepts an
+    optional [`SearchProperties`](@ref) cache to skip per-call probes.
 
 Strategies can also be passed to the batched
 [`searchsortedlast!`](@ref) / [`searchsortedfirst!`](@ref) APIs.
@@ -423,11 +424,55 @@ struct GuesserHint{G} <: SearchStrategy
 end
 
 """
+    SearchProperties
+
+Cached, non-allocating facts about a sorted vector. Pass to [`Auto`](@ref)
+via `Auto(props)` to skip the per-call probes that the default `Auto()` runs
+on every batched call. Stored fields are kept to plain `Bool`s so the struct
+stays `isbits` and travels in registers.
+
+Default-constructed (`SearchProperties()`) is the "no information" sentinel:
+`has_props` is `false`, the other fields are unspecified and ignored by
+`Auto`. Construct via `SearchProperties(v::AbstractVector)` to populate the
+fields by running the probes once.
+
+Currently consumed: `is_linear` (replaces Auto's per-call
+`_sampled_looks_linear` probe in the batched path). The other fields are
+populated for forward compatibility but no built-in strategy reads them yet.
+"""
+struct SearchProperties
+    has_props::Bool
+    is_linear::Bool
+    has_nan::Bool
+end
+
+SearchProperties() = SearchProperties(false, false, false)
+
+# `has_nan` is only meaningful for floating-point eltypes; for other numeric
+# types and non-numeric eltypes there is no NaN concept.
+@inline _has_nan(v::AbstractVector{<:AbstractFloat}) = any(isnan, v)
+@inline _has_nan(::AbstractVector) = false
+
+"""
+    SearchProperties(v::AbstractVector)
+
+Run the linearity probe and (for floating-point eltypes) the NaN scan on `v`,
+returning the populated [`SearchProperties`](@ref). Cost is O(n) on
+floating-point vectors because of the NaN scan; for integer and non-numeric
+eltypes the cost is O(1) — only the sampled-linearity probe runs.
+"""
+function SearchProperties(v::AbstractVector)
+    return SearchProperties(true, _sampled_looks_linear(v), _has_nan(v))
+end
+
+"""
     Auto <: SearchStrategy
+    Auto()
+    Auto(props::SearchProperties)
 
 Heuristically picks among [`LinearScan`](@ref), [`ExpFromLeft`](@ref),
-[`BracketGallop`](@ref), and [`BinaryBracket`](@ref). The choice depends on
-the calling context:
+[`InterpolationSearch`](@ref), [`BracketGallop`](@ref), and
+[`BinaryBracket`](@ref). The choice depends on the calling context:
 
 **Per-query** (`searchsortedlast(Auto(), v, x[, hint])`):
   - No hint, or hint outside `axes(v)` → [`BinaryBracket`](@ref).
@@ -442,8 +487,8 @@ clustered inside one segment of `v` are recognized as having gap ≈ 0:
   - `gap ≤ 4` → [`LinearScan`](@ref) (most queries land in the same
     segment or the next; linear-walk overhead is minimal, and `ExpFromLeft`
     wastes its 5 initial linear probes when the gap is already 0 or 1).
-  - `gap > 64`, `length(v) ≥ 1024`, `length(queries) ≥ 2`, and a sampled
-    linearity probe (5 reads, ~12 ns) accepts → [`InterpolationSearch`](@ref).
+  - `gap ≥ 8`, `length(v) ≥ 1024`, `length(queries) ≥ 2`, and a sampled
+    linearity probe (~25 ns) accepts → [`InterpolationSearch`](@ref).
     On uniformly-spaced data this is ~2× faster than `ExpFromLeft` for
     sparse queries; the linearity probe is what keeps `Auto` from picking
     `InterpolationSearch` on irregular data where it would lose badly.
@@ -454,8 +499,17 @@ clustered inside one segment of `v` are recognized as having gap ≈ 0:
 
 **Batched unsorted**: falls back to per-element `Base.searchsortedlast` /
 `Base.searchsortedfirst` with no hint regardless of strategy.
+
+**Cached properties.** Passing a populated [`SearchProperties`](@ref) via
+`Auto(props)` short-circuits the per-call probes. The cached path is
+behaviour-equivalent to `Auto()` when `props` is up to date for `v`; the
+caller is responsible for re-computing `props` if `v` mutates.
 """
-struct Auto <: SearchStrategy end
+struct Auto <: SearchStrategy
+    props::SearchProperties
+end
+
+Auto() = Auto(SearchProperties())
 
 # Per-query Auto threshold: under this length, the bracket-search bookkeeping
 # costs more than a worst-case linear walk.
@@ -1097,7 +1151,7 @@ end
 # branch is type-stable so the loop specializes on the concrete strategy).
 function _searchsortedlast_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
-        ::Auto, order::Base.Order.Ordering
+        s::Auto, order::Base.Order.Ordering
     )
     m = length(queries)
     m == 0 && return idx_out
@@ -1124,11 +1178,12 @@ function _searchsortedlast_batched!(
     # roughly uniformly within their span. For skewed (clustered) queries,
     # `ExpFromLeft` from `prev_idx` wins even on linear v because the next
     # query's true index is close to the previous one's.
+    is_linear = s.props.has_props ? s.props.is_linear : _sampled_looks_linear(v)
     if !skewed &&
             gap >= _AUTO_INTERP_MIN_GAP &&
             length(v) >= _AUTO_INTERP_MIN_N &&
             m >= _AUTO_INTERP_MIN_M &&
-            _sampled_looks_linear(v)
+            is_linear
         return _searchsortedlast_sorted_loop!(
             idx_out, v, queries, InterpolationSearch(), order
         )
@@ -1151,7 +1206,7 @@ end
 
 function _searchsortedfirst_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
-        ::Auto, order::Base.Order.Ordering
+        s::Auto, order::Base.Order.Ordering
     )
     m = length(queries)
     m == 0 && return idx_out
@@ -1169,11 +1224,12 @@ function _searchsortedfirst_batched!(
             idx_out, v, queries, LinearScan(), order
         )
     end
+    is_linear = s.props.has_props ? s.props.is_linear : _sampled_looks_linear(v)
     if !skewed &&
             gap >= _AUTO_INTERP_MIN_GAP &&
             length(v) >= _AUTO_INTERP_MIN_N &&
             m >= _AUTO_INTERP_MIN_M &&
-            _sampled_looks_linear(v)
+            is_linear
         return _searchsortedfirst_sorted_loop!(
             idx_out, v, queries, InterpolationSearch(), order
         )
@@ -1348,6 +1404,7 @@ using PrecompileTools: @compile_workload, @setup_workload
         for strategy in (
                 LinearScan(), SIMDLinearScan(), BracketGallop(), ExpFromLeft(),
                 InterpolationSearch(), BinaryBracket(), Auto(),
+                Auto(SearchProperties(linear_vec)),
             )
             searchsortedfirst(strategy, vec_int64, Int64(8), Int64(1))
             searchsortedlast(strategy, vec_int64, Int64(8), Int64(1))

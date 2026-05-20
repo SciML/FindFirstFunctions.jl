@@ -220,6 +220,53 @@ slower than the per-cell winner. Investigate any row where the ratio
 exceeds 1.5 — those are candidate cells for tightening one of the
 constants in the table above.
 
+## Caching with `SearchProperties`
+
+Every call to `searchsortedlast!(out, v, queries; strategy = Auto())` against
+the same `v` re-runs the same probes — `_sampled_looks_linear(v)` reads 11
+elements (~25 ns), and the cost is per-call regardless of how many times
+you've already searched `v`. For callers issuing many short batches against
+a single sorted vector (interpolation segment lookups being the obvious
+case), caching the probes once and reusing the result is a real win.
+
+The cache is a small `isbits` struct, [`SearchProperties`](@ref
+FindFirstFunctions.SearchProperties), that `Auto` accepts via
+`Auto(props)`:
+
+```julia
+using FindFirstFunctions
+
+v = collect(0.0:0.001:100.0)
+props = SearchProperties(v)            # run probes once
+strat = Auto(props)                    # `Auto` holding the cached facts
+
+# Every subsequent searchsortedlast!/searchsortedfirst! call skips the
+# linearity probe inside Auto.
+queries = sort!(rand(8) .* 100.0)
+out = Vector{Int}(undef, length(queries))
+searchsortedlast!(out, v, queries; strategy = strat)
+```
+
+`SearchProperties` is `isbits` — it travels in registers and copies are
+free. `Auto(props)` is itself zero-allocation; the resulting `Auto` is a
+single concrete struct, not a parametric type, so call sites stay
+type-stable without specialization explosions.
+
+Currently consumed: `props.is_linear` (replaces Auto's
+`_sampled_looks_linear` probe in the batched path). The other fields
+(`has_props`, `has_nan`) are populated by `SearchProperties(v)` for forward
+compatibility but no strategy reads them yet. Construction cost is O(1) for
+integer eltypes (only the sampled-linearity probe runs) and O(n) for
+floating-point eltypes (additionally `any(isnan, v)`).
+
+Trust contract: the cache is not invalidated automatically. If `v` mutates
+after `SearchProperties(v)`, the caller must reconstruct the cache. Lying
+to `Auto` via a hand-constructed `SearchProperties(true, true, false)` on
+genuinely non-linear data is correctness-preserving (the chosen
+`InterpolationSearch` falls through to `BracketGallop` from a bad guess —
+slow but still O(log n)), so the worst case of a stale cache is a
+performance regression, not wrong answers.
+
 ## When `Auto` is wrong for you
 
 If your workload sits in a corner that `Auto` doesn't read well, pin the

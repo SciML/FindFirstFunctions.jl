@@ -40,6 +40,7 @@ FindFirstFunctions.ExpFromLeft
 FindFirstFunctions.InterpolationSearch
 FindFirstFunctions.BinaryBracket
 FindFirstFunctions.Auto
+FindFirstFunctions.SearchProperties
 ```
 
 `GuesserHint` is documented on the [Guessers](@ref) page.
