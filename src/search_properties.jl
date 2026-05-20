@@ -14,47 +14,65 @@
 const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
 
 # Sampled linearity check: probes v[1], v[k*n/10] for k = 1..9, v[n] and
-# tests whether all interior points sit within `_AUTO_LINEAR_REL_TOLERANCE`
-# (default 0.1%) of the straight line between v[1] and v[n]. The tight
-# tolerance reliably distinguishes truly-uniform data from random/sorted
-# data even at large n (where the order-statistic variance ≈ 1/sqrt(n)
+# computes the maximum relative deviation of the 9 interior points from
+# the straight line between v[1] and v[n]. Returns the max relative error
+# (or `Inf` if `v` is unsuitable — too short, zero/infinite span, etc.).
+#
+# A single scan produces several different bool flags by comparing the
+# returned error against different tolerances:
+#
+#   - `_AUTO_LINEAR_REL_TOLERANCE` (default 0.1%) gates `InterpolationSearch`
+#     in Auto's batched dispatch.
+#   - `_AUTO_LINEAR_LOOSE_TOLERANCE` (5%) for the large-gap regime.
+#   - `_UNIFORM_REL_TOLERANCE` (~1e-12, a few ulp) flags
+#     exactly-uniformly-spaced data so `SearchProperties` can set
+#     `is_uniform` for any `AbstractVector` (not just `AbstractRange`).
+#
+# Cost is ~25 ns regardless of n — 11 reads + 9 multiply/add + 9 compares.
+# Tight tolerance reliably distinguishes truly-uniform data from random
+# sorted data even at large n (where order-statistic variance ≈ 1/sqrt(n)
 # would fool a looser check).
-#
-# Cost is ~25 ns regardless of n — 11 reads + 9 comparisons. Used by Auto
-# to decide whether to gamble on InterpolationSearch.
-#
-# InterpolationSearch's downside on non-linear data is large (4-14× slower
-# than ExpFromLeft on log/plateau/two-scale spacings), so we err on the
-# side of rejecting borderline cases. Truly uniform data — exact ranges,
-# evenly-spaced grids, and small-amplitude jittered data — passes; sorted
-# random data is rejected at all `n` tested up to ~10⁶.
-@inline function _sampled_looks_linear(
+@inline function _sampled_linear_err(
         v::AbstractVector{<:Number},
-        tol::Float64 = _AUTO_LINEAR_REL_TOLERANCE,
     )
     n = length(v)
-    n < 11 && return false
+    n < 11 && return Inf
     @inbounds begin
         v1, vn = v[1], v[n]
         span = vn - v1
-        (iszero(span) || !isfinite(span)) && return false
+        (iszero(span) || !isfinite(span)) && return Inf
         abs_span = abs(span)
         nm1 = n - 1
+        max_err = 0.0
         for k in 1:9
             kk = 1 + (k * nm1) ÷ 10
             expected = v1 + (kk - 1) / nm1 * span
-            rel_err = abs(v[kk] - expected) / abs_span
-            rel_err > tol && return false
+            rel_err = Float64(abs(v[kk] - expected) / abs_span)
+            rel_err > max_err && (max_err = rel_err)
         end
+        return max_err
     end
-    return true
 end
 
-# Non-numeric eltype: can't sample, never picks InterpolationSearch.
-@inline _sampled_looks_linear(::AbstractVector, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = false
+# Non-numeric eltype: can't sample. Returns Inf so every tolerance check fails.
+@inline _sampled_linear_err(::AbstractVector) = Inf
 
-# AbstractRange is definitionally uniform — accept without sampling.
-@inline _sampled_looks_linear(::AbstractRange, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = true
+# AbstractRange is definitionally uniform — error is zero by construction.
+@inline _sampled_linear_err(::AbstractRange) = 0.0
+
+# Tolerance treating "uniform" as a few ulp of accumulated float roundoff.
+# `collect(0.0:0.1:10.0)` has rel_err ≈ 1e-16 to 1e-15 from float-step
+# imprecision; `1e-12` accepts it cleanly. Random / jittered data at any
+# n has rel_err well above this. The constant is conservative — tightening
+# further would risk false negatives on long Float ranges.
+const _UNIFORM_REL_TOLERANCE = 1.0e-12
+
+@inline _sampled_looks_linear(
+    v::AbstractVector, tol::Float64 = _AUTO_LINEAR_REL_TOLERANCE,
+) = _sampled_linear_err(v) <= tol
+
+@inline _sampled_looks_uniform(v::AbstractVector) =
+    _sampled_linear_err(v) <= _UNIFORM_REL_TOLERANCE
 
 # Sampled "log-linear" probe: same 9-point probe as `_sampled_looks_linear`
 # but tests whether `log(v)` is linear in array index. Used to detect
@@ -117,35 +135,47 @@ the flag is set automatically by the dedicated overload below.
 function SearchProperties(
         v::AbstractVector;
         linear_tolerance::Real = 1.0e-3,
-        is_uniform::Bool = false,
+        is_uniform::Union{Nothing, Bool} = nothing,
     )
     tol = Float64(linear_tolerance)
+    # One scan produces both `is_linear` and the uniformity-deviation
+    # check. `is_uniform = nothing` (default) means "infer from the
+    # probe"; an explicit Bool overrides.
+    err = _sampled_linear_err(v)
+    detected_uniform = err <= _UNIFORM_REL_TOLERANCE
     return SearchProperties(
         true,
-        _sampled_looks_linear(v, tol),
+        err <= tol,
         _has_nan(v),
         _sampled_looks_log_linear(v, tol),
-        is_uniform,
+        is_uniform === nothing ? detected_uniform : is_uniform,
     )
 end
 
 """
     SearchProperties(v::AbstractRange; linear_tolerance = 1.0e-3)
 
-Specialised constructor for `AbstractRange`. Sets `is_uniform = true`
-unconditionally — every `AbstractRange` is by definition uniformly
-spaced, so `Auto` can short-circuit to [`UniformStep`](@ref).
+Specialised constructor for `AbstractRange{<:Real}`. Skips every runtime
+probe — every property is known statically from the type:
+
+  - `is_linear = true` — ranges are linear in index by construction.
+  - `is_uniform = true` — ranges have exact uniform spacing.
+  - `has_nan = false` — `AbstractRange{<:Real}` values are computed from
+    `first(r) + (i - 1) * step(r)`; barring `first(r)` or `step(r)`
+    themselves being NaN, the values are all finite. For the rare
+    pathological `LinRange(NaN, …, …)` case the caller is on their own.
+  - `is_log_linear = false` — a range that's linear in index is *not*
+    log-linear in value (the values are arithmetically, not
+    geometrically, spaced). The flag would only be `true` for ranges of
+    `exp(x)` values, which Julia represents as a `Vector`, not an
+    `AbstractRange`.
+
+`linear_tolerance` is accepted for signature compatibility but ignored
+— the probes are skipped.
 """
 function SearchProperties(
-        v::AbstractRange;
+        v::AbstractRange{<:Real};
         linear_tolerance::Real = 1.0e-3,
     )
-    tol = Float64(linear_tolerance)
-    return SearchProperties(
-        true,
-        _sampled_looks_linear(v, tol),
-        _has_nan(v),
-        _sampled_looks_log_linear(v, tol),
-        true,
-    )
+    return SearchProperties(true, true, false, false, true)
 end

@@ -577,17 +577,26 @@ end
             p_signed = SearchProperties(v_signed)
             @test !p_signed.is_log_linear
 
-            # is_uniform: false by default on Vector, true on AbstractRange
-            # (automatic via the AbstractRange constructor).
-            @test !SearchProperties(collect(1:100)).is_uniform
-            @test SearchProperties(1:100).is_uniform
-            @test SearchProperties(0.0:0.1:10.0).is_uniform
-            @test SearchProperties(LinRange(0.0, 10.0, 100)).is_uniform
-            # `is_uniform = true` kwarg on Vector is accepted (currently no
-            # consumer; UniformStep falls back to BinaryBracket on Vector,
-            # so the flag is a forward-compatibility marker for callers).
-            p_uniform = SearchProperties(collect(0.0:0.5:50.0); is_uniform = true)
-            @test p_uniform.is_uniform
+            # is_uniform: detected for any uniformly-spaced vector. The
+            # 9-point linearity probe at a tight 1e-12 tolerance flags
+            # exact uniformity (a few ulp of accumulated float roundoff).
+            # AbstractRange short-circuits to true with no probe.
+            @test SearchProperties(1:100).is_uniform                      # range
+            @test SearchProperties(0.0:0.1:10.0).is_uniform               # StepRangeLen
+            @test SearchProperties(LinRange(0.0, 10.0, 100)).is_uniform   # LinRange
+            @test SearchProperties(collect(1:100)).is_uniform             # uniform Vector
+            @test SearchProperties(collect(0.0:0.1:10.0)).is_uniform      # uniform Vector
+            # Non-uniform vectors are rejected.
+            v_log_collected = collect(exp.(range(0.0, log(1.0e6); length = 100)))
+            @test !SearchProperties(v_log_collected).is_uniform
+            v_random = sort!(rand(StableRNG(42), 100))
+            @test !SearchProperties(v_random).is_uniform
+            # Manual override: `is_uniform = false` forces rejection even
+            # if the probe would accept; `is_uniform = true` accepts even
+            # if the probe would reject.
+            v_uniform_collected = collect(0.0:0.5:50.0)
+            @test !SearchProperties(v_uniform_collected; is_uniform = false).is_uniform
+            @test SearchProperties(v_log_collected; is_uniform = true).is_uniform
         end
 
         @safetestset "Batched in-place searchsorted!" begin
