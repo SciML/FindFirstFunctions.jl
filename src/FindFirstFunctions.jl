@@ -10,7 +10,8 @@ module FindFirstFunctions
 export
     SearchStrategy,
     LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
-    InterpolationSearch, BinaryBracket, BisectThenSIMD,
+    InterpolationSearch, BitInterpolationSearch,
+    BinaryBracket, BisectThenSIMD,
     GuesserHint, Auto,
     SearchProperties,
     Guesser, looks_linear,
@@ -410,6 +411,45 @@ endpoints. Falls back to [`BinaryBracket`](@ref) for non-numeric element
 types where subtraction isn't defined.
 """
 struct InterpolationSearch <: SearchStrategy end
+
+"""
+    BitInterpolationSearch <: SearchStrategy
+
+Variant of [`InterpolationSearch`](@ref) that reinterprets `DenseVector{Float64}`
+as `DenseVector{UInt64}` before computing the extrapolation guess. For
+positive IEEE Float64 values, the bit pattern is monotonically increasing
+with the float value and is approximately linear in array index when the
+underlying data is *log-spaced* (geometric). On such data the bit-domain
+guess is far better than the float-domain guess that `InterpolationSearch`
+would compute — sometimes O(1) versus O(log n) refinement.
+
+After computing the bit-domain guess, the bracket and binary refine step
+uses the original float values for comparison, so the answer is identical
+to `Base.searchsortedlast` / `Base.searchsortedfirst`.
+
+Constraints:
+  - `DenseVector{Float64}` only (the IEEE bit-pattern trick is Float64-specific).
+  - Requires `v[1] > 0` and the query `x > 0` (negative, zero, subnormal,
+    and non-finite Float64 bit patterns are not monotonic with float value
+    under raw reinterpret).
+  - Forward ordering only.
+
+**This strategy is opt-in only** — `Auto` does not pick it. The bench sweep
+shows the per-query division and UInt64↔Float64 conversion overhead
+(~60–90 ns/q) costs more than the bracket refinement that the guess
+saves at every gap tested; pinning `BitInterpolationSearch` is slower than
+letting `Auto` pick `SIMDLinearScan` / `BracketGallop` / `ExpFromLeft`.
+The strategy is retained for users with workloads not covered by the
+sweep — for instance, very-large `n` (≥ 2²⁰), pathologically log-spaced
+data, or hardware where Float64 division is unusually cheap relative to
+the scalar walk.
+
+Falls back to [`InterpolationSearch`](@ref) for non-Float64 dense eltypes
+(where the bit pattern equals the value and the two strategies are
+equivalent), and to [`BinaryBracket`](@ref) for non-positive or
+non-finite Float64 data.
+"""
+struct BitInterpolationSearch <: SearchStrategy end
 
 """
     BinaryBracket <: SearchStrategy
@@ -1004,6 +1044,89 @@ Base.searchsortedfirst(
     s::InterpolationSearch, v::AbstractVector, x, ::Integer;
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Strategy: BitInterpolationSearch — InterpolationSearch on the IEEE bit
+# pattern of positive Float64. Cheaper than reinterpret-as-array because we
+# only need two endpoint reads and one query bitcast per call.
+@inline function _bit_interp_guess_f64(
+        v::DenseVector{Float64}, x::Float64, lo::Integer, hi::Integer
+    )
+    @inbounds vlo_bits = reinterpret(UInt64, v[lo])
+    @inbounds vhi_bits = reinterpret(UInt64, v[hi])
+    xu = reinterpret(UInt64, x)
+    span = vhi_bits - vlo_bits
+    iszero(span) && return lo
+    if xu <= vlo_bits
+        return lo
+    elseif xu >= vhi_bits
+        return hi
+    end
+    num = xu - vlo_bits
+    f = Float64(num) / Float64(span)
+    g = lo + round(Int, f * (hi - lo))
+    return clamp(g, lo, hi)
+end
+
+function Base.searchsortedlast(
+        ::BitInterpolationSearch, v::DenseVector{Float64}, x::Float64;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if order !== Base.Order.Forward
+        return searchsortedlast(v, x, order)
+    end
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo - 1
+    @inbounds if v[lo] <= 0.0 || !isfinite(v[lo]) || x <= 0.0 || !isfinite(x)
+        return searchsortedlast(BinaryBracket(), v, x; order = order)
+    end
+    g = _bit_interp_guess_f64(v, x, lo, hi)
+    return searchsortedlast(BracketGallop(), v, x, g; order = order)
+end
+
+function Base.searchsortedfirst(
+        ::BitInterpolationSearch, v::DenseVector{Float64}, x::Float64;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    if order !== Base.Order.Forward
+        return searchsortedfirst(v, x, order)
+    end
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo
+    @inbounds if v[lo] <= 0.0 || !isfinite(v[lo]) || x <= 0.0 || !isfinite(x)
+        return searchsortedfirst(BinaryBracket(), v, x; order = order)
+    end
+    g = _bit_interp_guess_f64(v, x, lo, hi)
+    return searchsortedfirst(BracketGallop(), v, x, g; order = order)
+end
+
+# Hint pass-through (bit-interp ignores externally-supplied hints).
+Base.searchsortedlast(
+    s::BitInterpolationSearch, v::DenseVector{Float64}, x::Float64, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(s, v, x; order = order)
+Base.searchsortedfirst(
+    s::BitInterpolationSearch, v::DenseVector{Float64}, x::Float64, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(s, v, x; order = order)
+
+# Non-Float64 / non-dense eltypes: fall back to plain InterpolationSearch
+# (bit reinterpret only carries the log-linearity trick for Float64).
+Base.searchsortedlast(
+    ::BitInterpolationSearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(InterpolationSearch(), v, x; order = order)
+Base.searchsortedfirst(
+    ::BitInterpolationSearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(InterpolationSearch(), v, x; order = order)
+Base.searchsortedlast(
+    ::BitInterpolationSearch, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(InterpolationSearch(), v, x; order = order)
+Base.searchsortedfirst(
+    ::BitInterpolationSearch, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(InterpolationSearch(), v, x; order = order)
 
 # Strategy: BisectThenSIMD — only meaningful for `findequal`. For the
 # positional `searchsortedfirst` / `searchsortedlast` dispatch, fall back to

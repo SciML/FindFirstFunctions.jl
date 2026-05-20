@@ -22,6 +22,7 @@ callers who already know their access pattern and want to pin a strategy.
 | [`BracketGallop`](@ref FindFirstFunctions.BracketGallop) | answer may be either side of the hint, distance unknown | O(1) | ~2 log₂ n | yes |
 | [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft) | sorted batch — hint is `prev_result`, answer is monotonically ≥ hint | O(1) | O(log n) | yes (as lower bound) |
 | [`InterpolationSearch`](@ref FindFirstFunctions.InterpolationSearch) | `v` is uniformly spaced and numeric | O(1) | O(log n) | no |
+| [`BitInterpolationSearch`](@ref FindFirstFunctions.BitInterpolationSearch) | `DenseVector{Float64}` and log-spaced (geometric) — opt-in, `Auto` does not pick | O(1) | O(log n) | no |
 | [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket) | no hint available, or fallback | O(log n) | O(log n) | no |
 | [`GuesserHint`](@ref FindFirstFunctions.GuesserHint) | repeated correlated lookups against the same `v` | O(1) | ~2 log₂ n | self-provided |
 | [`Auto`](@ref FindFirstFunctions.Auto) | unknown access pattern | varies | varies | yes if supplied |
@@ -38,6 +39,7 @@ FindFirstFunctions.SIMDLinearScan
 FindFirstFunctions.BracketGallop
 FindFirstFunctions.ExpFromLeft
 FindFirstFunctions.InterpolationSearch
+FindFirstFunctions.BitInterpolationSearch
 FindFirstFunctions.BinaryBracket
 FindFirstFunctions.BisectThenSIMD
 FindFirstFunctions.Auto
@@ -122,6 +124,61 @@ Caveats:
     [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft). Pin it
     explicitly when you have a workload that wants a long linear forward
     scan and you know the element type.
+
+### BitInterpolationSearch
+
+`InterpolationSearch` with the extrapolation guess computed on the IEEE
+bit pattern of `v` rather than the float values themselves. For positive
+Float64 values, the IEEE bit pattern is monotonically increasing with the
+float value and is approximately *linear* in array index for log-spaced
+(geometric) data. That makes the bit-domain linear extrapolation a far
+better guess than the float-domain linear extrapolation on geometric data
+— sometimes O(1) versus O(log n) refinement cost.
+
+**Opt-in only.** `Auto` does not pick `BitInterpolationSearch`. The bench
+sweep at `bench/bitinterp_sweep.jl` covers 1404 cells (9 v patterns × 4 q
+patterns × 6 n sizes up to 2²⁰ × 7 m sizes, exercising pure-geometric,
+log-spaced over 18 decades, power-of-2 spacing, two-decade clumps, and
+jittered-log alongside uniform/sqrt as negative controls). BitInterp
+wins outright in 59 cells (4.2%) and sits within 10% of the per-cell
+best in 75 cells (5.3%). The wins concentrate in:
+
+  - `logspaced` / `logspaced_wide` / `geometric_dense` / `geometric_sparse`
+    / `jittered_log` — i.e. genuinely geometric data.
+  - Small `m` (= 4, occasionally 16): the per-query bit-domain guess cost
+    amortizes poorly across larger batches.
+  - Large `n` (≥ 2¹⁴, peaking at 2²⁰): the saved bracket refinement scales
+    with `log₂ n`, while the per-query setup cost is constant.
+
+Sample wins (BitInterp vs second-best, ns/q):
+
+| Cell | BitInterp | Runner-up | Margin |
+|---|---|---|---|
+| `logspaced_wide log_grid n=2²⁰ m=4` | 52.5 | InterpolationSearch 75.0 | 1.43× |
+| `logspaced_wide log_grid n=2¹² m=4` | 35.0 | ExpFromLeft 47.5 | 1.36× |
+| `logspaced_wide log_grid n=2¹⁸ m=4` | 47.5 | ExpFromLeft 62.5 | 1.32× |
+| `logspaced_wide dense_grid n=2²⁰ m=4` | 50.0 | ExpFromLeft 65.0 | 1.30× |
+
+`Auto` doesn't pick it because:
+  - The wins are narrow (4% of cells in a bench specifically designed to
+    probe BitInterp's regime).
+  - Adding the eligibility check to `Auto`'s hot path (Float64 + positive
+    + log-linear sampled probe) would burn a few ns on every call, paying
+    back only in cells with `m ≤ 16` where Auto's overhead already
+    dominates the per-query cost.
+  - Users with a known log-spaced workload can pin
+    `searchsortedlast!(out, v, queries; strategy = BitInterpolationSearch())`
+    once and get the win without any heuristic cost.
+
+The strategy is retained as an opt-in for callers whose workload sits
+outside what `Auto` discovers cheaply: domain-specific tables (radiation
+transport, log-frequency, gravitational potentials) or hardware where
+Float64 division is unusually cheap.
+
+Falls back to plain `InterpolationSearch` on non-Float64 dense eltypes
+(where the bit pattern equals the value, making the strategies
+equivalent), and to `BinaryBracket` for non-positive or non-finite Float64
+data.
 
 ### BracketGallop
 

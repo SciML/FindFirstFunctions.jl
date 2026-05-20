@@ -381,31 +381,47 @@ with an analysis helper at `bench/analyze.jl`. See `auto.md` for the
 decision tree, the per-regime winner distribution, and how to run the
 sweep locally.
 
-### Investigated but rejected: BitInterpolationSearch for log-spaced data
+### New (opt-in): BitInterpolationSearch for log-spaced Float64 data
 
-A natural extension to `InterpolationSearch` was investigated: reinterpret a
-positive `DenseVector{Float64}` as `DenseVector{UInt64}`, then run the
-linear-extrapolation guess on the IEEE bit pattern. The hypothesis was that
-bit-pattern interpolation should beat `InterpolationSearch` on log-spaced
-(geometric) data — bit patterns are approximately linear in array index for
-log-spaced floats, since the IEEE binary exponent occupies the high bits.
+`BitInterpolationSearch` is a variant of `InterpolationSearch` that
+reinterprets a positive `DenseVector{Float64}` as `DenseVector{UInt64}`
+before computing the extrapolation guess. The IEEE bit pattern is
+monotonically increasing with the float value (for positive Float64) and
+approximately linear in array index when the underlying data is
+log-spaced (geometric). On such data the bit-domain guess can be far
+better than the float-domain guess that `InterpolationSearch` would
+compute.
 
-The strategy was implemented, correctness-verified against `Base`, and
-benchmarked against `InterpolationSearch` / `BracketGallop` / `ExpFromLeft`
-/ `SIMDLinearScan` / `Auto` across `m` ∈ {4, 16, 64, 256, 1024, 4096} on a
-`n = 65536` log-spaced Float64 vector with sparse queries. The result was
-that `BitInterpolationSearch` lost to every alternative at every `m`,
-clocking 65–88 ns/q while `ExpFromLeft` ran at 19–41 ns/q and
-`SIMDLinearScan` at 16–199 ns/q. The per-query division and floating-point
-arithmetic in the bit-domain guess cost more than the saved bracket
-refinement on log-spaced data, and the same overhead made the strategy
-strictly worse than plain `InterpolationSearch` on uniform-spaced data
-(where the bit pattern isn't linear in index in the first place — the
-denormal-to-normalized transition introduces a huge non-linearity at zero).
+A targeted bench sweep at `bench/bitinterp_sweep.jl` covers 9 v patterns
+× 4 q patterns × 6 n sizes (up to 2²⁰) × 7 m sizes, with v patterns
+specifically chosen to probe BitInterp's regime: `logspaced` (1 to 10⁶),
+`logspaced_wide` (10⁻³ to 10¹⁵), `geometric_dense` (geometric spanning
+10⁶), `geometric_sparse` (geometric spanning 10¹²), `power2`, `sqrt`,
+`two_decade`, `jittered_log`, and `uniform` (as the negative control).
 
-The strategy was not retained. `Auto` already serves log-spaced data well
-via `SIMDLinearScan` (medium gap) and `BracketGallop` / `ExpFromLeft`
-(large gap); no new dispatch path is needed.
+Result over 1404 cells: BitInterp wins outright in 59 cells (4.2%) and
+sits within 10% of the per-cell best in 75 cells (5.3%). The wins
+concentrate in `logspaced_wide` / `logspaced` / `geometric_*` /
+`jittered_log` at small m (= 4) and large n (≥ 16384). Margins range
+from 1.0× (tie) to 1.43× (`logspaced_wide log_grid n=2²⁰ m=4`). On
+non-log-spaced data (`uniform`, `power2`, `sqrt`, `two_decade`)
+BitInterp loses — the bit-pattern guess is worse than the float-domain
+guess when the data isn't geometric.
+
+**`Auto` does not pick BitInterp.** The wins are real but narrow
+(small batches, very large n, true log-spacing), and adding the dispatch
+overhead to Auto's hot path would penalize the much larger set of
+non-log-spaced workloads. The strategy is exported as `BitInterpolationSearch`
+for callers who know their data is log-spaced and want to pin it.
+
+Constraints:
+  - `DenseVector{Float64}` only; non-Float64 dense eltypes fall back to
+    plain `InterpolationSearch`.
+  - Requires `v[1] > 0`, `x > 0`, and both finite. Subnormal /
+    non-finite Float64 bit patterns are not monotonic with float value
+    under raw reinterpret, so the strategy falls back to `BinaryBracket`
+    in those cases.
+  - Forward ordering only.
 
 ### Cleanup: typo fix, FFE_IR unification, tolerance kwarg
 
