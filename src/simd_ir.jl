@@ -100,6 +100,15 @@ const _SIMD_GE_I64_IR = _simd_scan_ir("i64", "sge")
 const _SIMD_GT_F64_IR = _simd_scan_ir("double", "ogt")
 const _SIMD_GE_F64_IR = _simd_scan_ir("double", "oge")
 
+# Reverse-direction predicates: used by `SIMDLinearScan` under
+# `Base.Order.Reverse` ordering, where the array is decreasing and we want
+# to find the first lane where `v[i] < x` (searchsortedlast) or `v[i] <= x`
+# (searchsortedfirst).
+const _SIMD_LT_I64_IR = _simd_scan_ir("i64", "slt")
+const _SIMD_LE_I64_IR = _simd_scan_ir("i64", "sle")
+const _SIMD_LT_F64_IR = _simd_scan_ir("double", "olt")
+const _SIMD_LE_F64_IR = _simd_scan_ir("double", "ole")
+
 # Backing primitives for SIMDLinearScan. Each returns the 0-based offset of
 # the first lane satisfying the predicate, or -1 if none. Caveat: NaN inputs
 # always compare false under the ordered `o*` float predicates, so NaN in `v`
@@ -129,6 +138,36 @@ end
 function _simd_first_ge(x::Float64, ptr::Ptr{Float64}, len::Int64)
     return Base.llvmcall(
         (_SIMD_GE_F64_IR, "entry"),
+        Int64, Tuple{Float64, Ptr{Float64}, Int64},
+        x, ptr, len
+    )
+end
+
+# Reverse-direction primitives.
+function _simd_first_lt(x::Int64, ptr::Ptr{Int64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_LT_I64_IR, "entry"),
+        Int64, Tuple{Int64, Ptr{Int64}, Int64},
+        x, ptr, len
+    )
+end
+function _simd_first_le(x::Int64, ptr::Ptr{Int64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_LE_I64_IR, "entry"),
+        Int64, Tuple{Int64, Ptr{Int64}, Int64},
+        x, ptr, len
+    )
+end
+function _simd_first_lt(x::Float64, ptr::Ptr{Float64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_LT_F64_IR, "entry"),
+        Int64, Tuple{Float64, Ptr{Float64}, Int64},
+        x, ptr, len
+    )
+end
+function _simd_first_le(x::Float64, ptr::Ptr{Float64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_LE_F64_IR, "entry"),
         Int64, Tuple{Float64, Ptr{Float64}, Int64},
         x, ptr, len
     )
