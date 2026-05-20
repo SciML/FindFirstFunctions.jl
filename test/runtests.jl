@@ -633,6 +633,162 @@ end
             end
         end
 
+        @safetestset "SIMDBinarySearch correctness" begin
+            using FindFirstFunctions, StableRNGs
+            F = FindFirstFunctions
+
+            @testset "Int64 fuzz vs Base" begin
+                rng = StableRNG(4001)
+                for _ in 1:5_000
+                    n = rand(rng, 0:512)
+                    v = sort!(rand(rng, Int64(-1000):Int64(1000), n))
+                    x = rand(rng, Int64(-1100):Int64(1100))
+                    @test searchsortedlast(F.SIMDBinarySearch(), v, x) ==
+                        searchsortedlast(v, x)
+                    @test searchsortedfirst(F.SIMDBinarySearch(), v, x) ==
+                        searchsortedfirst(v, x)
+                end
+            end
+
+            @testset "Float64 fuzz vs Base" begin
+                rng = StableRNG(4002)
+                for _ in 1:5_000
+                    n = rand(rng, 0:512)
+                    v = sort!(randn(rng, n))
+                    x = (rand(rng) - 0.5) * 6
+                    @test searchsortedlast(F.SIMDBinarySearch(), v, x) ==
+                        searchsortedlast(v, x)
+                    @test searchsortedfirst(F.SIMDBinarySearch(), v, x) ==
+                        searchsortedfirst(v, x)
+                end
+            end
+
+            @testset "Multiple n covering basecase boundary" begin
+                rng = StableRNG(4003)
+                for n in (
+                        0, 1, 2, 7, 8, 15, 16, 17, 31, 32, 64, 127, 128,
+                        256, 1023, 1024, 4095, 4096,
+                    )
+                    v = sort!(randn(rng, n))
+                    isempty(v) && (
+                        @test searchsortedlast(F.SIMDBinarySearch(), v, 0.0) == 0;
+                        @test searchsortedfirst(F.SIMDBinarySearch(), v, 0.0) == 1;
+                        continue
+                    )
+                    for x in (
+                            v[1] - 1, v[1], v[end], v[end] + 1,
+                            (v[1] + v[end]) / 2,
+                        )
+                        @test searchsortedlast(F.SIMDBinarySearch(), v, x) ==
+                            searchsortedlast(v, x)
+                        @test searchsortedfirst(F.SIMDBinarySearch(), v, x) ==
+                            searchsortedfirst(v, x)
+                    end
+                    # Random fuzz at this n.
+                    for _ in 1:20
+                        x = (rand(rng) - 0.5) * 6
+                        @test searchsortedlast(F.SIMDBinarySearch(), v, x) ==
+                            searchsortedlast(v, x)
+                        @test searchsortedfirst(F.SIMDBinarySearch(), v, x) ==
+                            searchsortedfirst(v, x)
+                    end
+                end
+            end
+
+            @testset "Edge cases" begin
+                # Empty
+                @test searchsortedlast(F.SIMDBinarySearch(), Int64[], Int64(5)) == 0
+                @test searchsortedfirst(F.SIMDBinarySearch(), Int64[], Int64(5)) == 1
+                @test searchsortedlast(F.SIMDBinarySearch(), Float64[], 5.0) == 0
+                @test searchsortedfirst(F.SIMDBinarySearch(), Float64[], 5.0) == 1
+                # Single element
+                v1 = [42.0]
+                @test searchsortedlast(F.SIMDBinarySearch(), v1, 42.0) == 1
+                @test searchsortedlast(F.SIMDBinarySearch(), v1, 41.0) == 0
+                @test searchsortedlast(F.SIMDBinarySearch(), v1, 43.0) == 1
+                @test searchsortedfirst(F.SIMDBinarySearch(), v1, 42.0) == 1
+                @test searchsortedfirst(F.SIMDBinarySearch(), v1, 41.0) == 1
+                @test searchsortedfirst(F.SIMDBinarySearch(), v1, 43.0) == 2
+                # x outside range
+                v = collect(1.0:100.0)
+                @test searchsortedlast(F.SIMDBinarySearch(), v, -100.0) == 0
+                @test searchsortedlast(F.SIMDBinarySearch(), v, 200.0) == 100
+                @test searchsortedfirst(F.SIMDBinarySearch(), v, -100.0) == 1
+                @test searchsortedfirst(F.SIMDBinarySearch(), v, 200.0) == 101
+                # x at exact match
+                @test searchsortedlast(F.SIMDBinarySearch(), v, 50.0) ==
+                    searchsortedlast(v, 50.0)
+                @test searchsortedfirst(F.SIMDBinarySearch(), v, 50.0) ==
+                    searchsortedfirst(v, 50.0)
+                # Duplicates - small
+                vd = Float64[1.0, 2.0, 2.0, 2.0, 5.0]
+                @test searchsortedlast(F.SIMDBinarySearch(), vd, 2.0) == 4
+                @test searchsortedfirst(F.SIMDBinarySearch(), vd, 2.0) == 2
+                # Duplicates - large (exercises both base case and SIMD step)
+                vd_big = vcat(fill(1.0, 50), fill(2.0, 100), fill(5.0, 50))
+                @test searchsortedlast(F.SIMDBinarySearch(), vd_big, 2.0) == 150
+                @test searchsortedfirst(F.SIMDBinarySearch(), vd_big, 2.0) == 51
+                @test searchsortedlast(F.SIMDBinarySearch(), vd_big, 3.0) == 150
+                @test searchsortedfirst(F.SIMDBinarySearch(), vd_big, 3.0) == 151
+                # Constant vector
+                vc = fill(3.0, 32)
+                @test searchsortedlast(F.SIMDBinarySearch(), vc, 3.0) == 32
+                @test searchsortedlast(F.SIMDBinarySearch(), vc, 2.0) == 0
+                @test searchsortedlast(F.SIMDBinarySearch(), vc, 4.0) == 32
+                @test searchsortedfirst(F.SIMDBinarySearch(), vc, 3.0) == 1
+                @test searchsortedfirst(F.SIMDBinarySearch(), vc, 2.0) == 1
+                @test searchsortedfirst(F.SIMDBinarySearch(), vc, 4.0) == 33
+            end
+
+            @testset "Hint is ignored" begin
+                v = collect(1.0:100.0)
+                # Same answer regardless of hint
+                expected_last = searchsortedlast(v, 50.5)
+                expected_first = searchsortedfirst(v, 50.5)
+                for h in (1, 10, 50, 99, 100, -5, 1000)
+                    @test searchsortedlast(F.SIMDBinarySearch(), v, 50.5, h) ==
+                        expected_last
+                    @test searchsortedfirst(F.SIMDBinarySearch(), v, 50.5, h) ==
+                        expected_first
+                end
+            end
+
+            @testset "Fallback: non-Int64/Float64 eltypes" begin
+                # Int32 falls back to BinaryBracket
+                v32 = Int32[1, 5, 10, 20, 50, 100, 200]
+                for x in (Int32(0), Int32(7), Int32(20), Int32(300))
+                    @test searchsortedlast(F.SIMDBinarySearch(), v32, x) ==
+                        searchsortedlast(v32, x)
+                    @test searchsortedfirst(F.SIMDBinarySearch(), v32, x) ==
+                        searchsortedfirst(v32, x)
+                end
+                # Float32 same
+                v32f = Float32[1.0, 5.0, 10.0, 20.0, 50.0]
+                for x in (Float32(0.0), Float32(7.0), Float32(20.0), Float32(100.0))
+                    @test searchsortedlast(F.SIMDBinarySearch(), v32f, x) ==
+                        searchsortedlast(v32f, x)
+                end
+                # Non-numeric
+                vs = sort!(["alpha", "beta", "gamma", "delta", "epsilon"])
+                @test searchsortedlast(F.SIMDBinarySearch(), vs, "gamma") ==
+                    searchsortedlast(vs, "gamma")
+            end
+
+            @testset "Reverse order falls back" begin
+                v_rev = collect(Int64, 100:-1:1)
+                @test searchsortedlast(
+                    F.SIMDBinarySearch(), v_rev, Int64(50); order = Base.Order.Reverse,
+                ) == searchsortedlast(v_rev, Int64(50), Base.Order.Reverse)
+                @test searchsortedfirst(
+                    F.SIMDBinarySearch(), v_rev, Int64(50); order = Base.Order.Reverse,
+                ) == searchsortedfirst(v_rev, Int64(50), Base.Order.Reverse)
+            end
+
+            @testset "Strategy hierarchy" begin
+                @test F.SIMDBinarySearch <: F.SearchStrategy
+            end
+        end
+
         @safetestset "findequal + BisectThenSIMD" begin
             using FindFirstFunctions, StableRNGs
             F = FindFirstFunctions

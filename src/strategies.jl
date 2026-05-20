@@ -166,6 +166,29 @@ that is supplied.
 struct BinaryBracket <: SearchStrategy end
 
 """
+    SIMDBinarySearch <: SearchStrategy
+
+Single-query binary search that evaluates 8 candidate positions per iteration
+via SIMD.jl `Vec{8, T}` gather + lane-wise compare. The bracket `[lo, hi]` is
+divided into 8 segments by 7 internal probe positions plus 1 segment-boundary
+probe; each step narrows the bracket by a factor of ~8 instead of the
+factor-of-2 of standard binary search. Asymptotic cost is ~log₈(n) gather +
+compare + bitmask operations, which for large `n` is about a third of the
+log₂(n) compares of `BinaryBracket`.
+
+Specialised for `DenseVector{Int64}` and `DenseVector{Float64}`. Other
+eltypes fall back to [`BinaryBracket`](@ref). The strategy ignores any hint
+that is supplied — the bracket starts at `[firstindex(v), lastindex(v)]` on
+every call. For batched sorted-query workloads use a hinted strategy
+(`ExpFromLeft`, `BracketGallop`, `SIMDLinearScan`) instead.
+
+This strategy is opt-in only; `Auto` does not pick it. Whether it actually
+beats scalar `BinaryBracket` depends on hardware (gather latency, vector
+unit width) and `n`. See `bench/simd_binary_sweep.jl`.
+"""
+struct SIMDBinarySearch <: SearchStrategy end
+
+"""
     BisectThenSIMD <: SearchStrategy
 
 Equality-search strategy. Binary-bisects `v` down to a small basecase, then
