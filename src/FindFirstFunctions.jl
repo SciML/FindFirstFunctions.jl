@@ -15,7 +15,7 @@ export
     GuesserHint, Auto,
     SearchProperties,
     Guesser, looks_linear,
-    searchsortedfirst!, searchsortedlast!,
+    searchsortedfirst!, searchsortedlast!, searchsortedrange,
     findequal, findfirstequal, findfirstsortedequal
 
 # https://github.com/JuliaLang/julia/pull/53687
@@ -511,17 +511,20 @@ Default-constructed (`SearchProperties()`) is the "no information" sentinel:
 `Auto`. Construct via `SearchProperties(v::AbstractVector)` to populate the
 fields by running the probes once.
 
-Currently consumed: `is_linear` (replaces Auto's per-call
-`_sampled_looks_linear` probe in the batched path). The other fields are
-populated for forward compatibility but no built-in strategy reads them yet.
+Currently consumed: `is_linear` and `has_nan` (the latter only on Float64,
+to gate `SIMDLinearScan` eligibility in `Auto`). `is_log_linear` is
+populated for callers that want to manually pin
+[`BitInterpolationSearch`](@ref) based on data shape; `Auto` does not
+consume it. The fields are otherwise populated for forward compatibility.
 """
 struct SearchProperties
     has_props::Bool
     is_linear::Bool
     has_nan::Bool
+    is_log_linear::Bool
 end
 
-SearchProperties() = SearchProperties(false, false, false)
+SearchProperties() = SearchProperties(false, false, false, false)
 
 # `has_nan` is only meaningful for floating-point eltypes; for other numeric
 # types and non-numeric eltypes there is no NaN concept.
@@ -547,10 +550,12 @@ function SearchProperties(
         v::AbstractVector;
         linear_tolerance::Real = 1.0e-3,
     )
+    tol = Float64(linear_tolerance)
     return SearchProperties(
         true,
-        _sampled_looks_linear(v, Float64(linear_tolerance)),
+        _sampled_looks_linear(v, tol),
         _has_nan(v),
+        _sampled_looks_log_linear(v, tol),
     )
 end
 
@@ -698,6 +703,41 @@ end
 
 # AbstractRange is definitionally uniform — accept without sampling.
 @inline _sampled_looks_linear(::AbstractRange, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = true
+
+# Sampled "log-linear" probe: same 9-point probe as `_sampled_looks_linear`
+# but tests whether `log(v)` is linear in array index. Used to detect
+# geometric / log-spaced data where `BitInterpolationSearch` is a win.
+# Requires all sampled points to be strictly positive and finite; otherwise
+# returns false. The probe runs in ~30 ns (the `log` calls are not cheap
+# but only 11 of them, all at fixed index positions).
+@inline function _sampled_looks_log_linear(
+        v::AbstractVector{<:Real},
+        tol::Float64 = _AUTO_LINEAR_REL_TOLERANCE,
+    )
+    n = length(v)
+    n < 11 && return false
+    @inbounds begin
+        v1, vn = v[1], v[n]
+        (v1 <= 0 || vn <= 0 || !isfinite(v1) || !isfinite(vn)) && return false
+        log_v1 = log(Float64(v1))
+        log_vn = log(Float64(vn))
+        span = log_vn - log_v1
+        (iszero(span) || !isfinite(span)) && return false
+        abs_span = abs(span)
+        nm1 = n - 1
+        for k in 1:9
+            kk = 1 + (k * nm1) ÷ 10
+            vk = v[kk]
+            (vk <= 0 || !isfinite(vk)) && return false
+            expected = log_v1 + (kk - 1) / nm1 * span
+            rel_err = abs(log(Float64(vk)) - expected) / abs_span
+            rel_err > tol && return false
+        end
+    end
+    return true
+end
+
+@inline _sampled_looks_log_linear(::AbstractVector, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = false
 
 # Strategy: BinaryBracket — ignore any hint.
 Base.searchsortedlast(
@@ -1269,7 +1309,8 @@ Base.searchsortedfirst(
 # ---------------------------------------------------------------------------
 
 """
-    searchsortedlast!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward)
+    searchsortedlast!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward,
+                       queries_sorted = nothing)
 
 In-place batched [`searchsortedlast`](@ref Base.searchsortedlast). Writes one
 index per element of `queries` into `idx_out` (which must be the same length).
@@ -1281,6 +1322,20 @@ the next query, so the total cost is O(length(v) + length(queries)) under
 If `queries` is not sorted, falls back to per-element `searchsortedlast` with
 no hint regardless of `strategy`.
 
+The `queries_sorted` kwarg controls the runtime `issorted(queries)` check:
+
+  - `nothing` (default): run `issorted(queries; order = order)` on every call.
+    O(m) bookkeeping, roughly 1 ns/q on long batches.
+  - `true`: trust the caller — skip the check and take the sorted-loop path
+    unconditionally. Use this when you already know your queries are sorted
+    (you computed them as a range, sorted them yourself, etc.). Wrong-answer
+    risk: a non-sorted `queries` passed with `queries_sorted = true` will
+    produce incorrect results, since the inner loop uses the previous result
+    as a hint and that hint becomes invalid when queries jump backward.
+  - `false`: skip the check and take the unsorted-loop path unconditionally
+    (per-query unhinted `Base.searchsortedlast`). Use when you know queries
+    are not sorted and want to avoid the O(m) probe.
+
 Returns `idx_out`.
 """
 function searchsortedlast!(
@@ -1288,7 +1343,8 @@ function searchsortedlast!(
         v::AbstractVector,
         queries::AbstractVector;
         strategy::SearchStrategy = Auto(),
-        order::Base.Order.Ordering = Base.Order.Forward
+        order::Base.Order.Ordering = Base.Order.Forward,
+        queries_sorted::Union{Nothing, Bool} = nothing,
     )
     if length(idx_out) != length(queries)
         throw(
@@ -1297,21 +1353,25 @@ function searchsortedlast!(
             )
         )
     end
-    return _searchsortedlast_batched!(idx_out, v, queries, strategy, order)
+    return _searchsortedlast_batched!(
+        idx_out, v, queries, strategy, order, queries_sorted
+    )
 end
 
 """
-    searchsortedfirst!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward)
+    searchsortedfirst!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward,
+                        queries_sorted = nothing)
 
 In-place batched [`searchsortedfirst`](@ref Base.searchsortedfirst). See
-[`searchsortedlast!`](@ref) for behavior.
+[`searchsortedlast!`](@ref) for behavior and for the `queries_sorted` kwarg.
 """
 function searchsortedfirst!(
         idx_out::AbstractVector{<:Integer},
         v::AbstractVector,
         queries::AbstractVector;
         strategy::SearchStrategy = Auto(),
-        order::Base.Order.Ordering = Base.Order.Forward
+        order::Base.Order.Ordering = Base.Order.Forward,
+        queries_sorted::Union{Nothing, Bool} = nothing,
     )
     if length(idx_out) != length(queries)
         throw(
@@ -1320,7 +1380,9 @@ function searchsortedfirst!(
             )
         )
     end
-    return _searchsortedfirst_batched!(idx_out, v, queries, strategy, order)
+    return _searchsortedfirst_batched!(
+        idx_out, v, queries, strategy, order, queries_sorted
+    )
 end
 
 # Sorted inner loop, parameterized on strategy. Used by both the generic and
@@ -1379,11 +1441,23 @@ function _searchsortedfirst_unsorted_loop!(
     return idx_out
 end
 
+# Decide whether to take the sorted-queries fast path. `queries_sorted` is
+# the caller-supplied override: `nothing` means "check at runtime", `true`
+# means "trust the caller, skip the O(m) issorted probe", `false` means
+# "force the unsorted path".
+@inline function _take_sorted_path(
+        queries, order::Base.Order.Ordering, queries_sorted::Union{Nothing, Bool}
+    )
+    return queries_sorted === nothing ?
+        issorted(queries; order = order) : queries_sorted
+end
+
 function _searchsortedlast_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
-        strategy::SearchStrategy, order::Base.Order.Ordering
+        strategy::SearchStrategy, order::Base.Order.Ordering,
+        queries_sorted::Union{Nothing, Bool},
     )
-    return if issorted(queries; order = order)
+    return if _take_sorted_path(queries, order, queries_sorted)
         _searchsortedlast_sorted_loop!(idx_out, v, queries, strategy, order)
     else
         _searchsortedlast_unsorted_loop!(idx_out, v, queries, order)
@@ -1395,7 +1469,8 @@ end
 # branch is type-stable so the loop specializes on the concrete strategy).
 function _searchsortedlast_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
-        s::Auto, order::Base.Order.Ordering
+        s::Auto, order::Base.Order.Ordering,
+        queries_sorted::Union{Nothing, Bool},
     )
     m = length(queries)
     m == 0 && return idx_out
@@ -1407,7 +1482,7 @@ function _searchsortedlast_batched!(
             searchsortedlast(v, queries[firstindex(queries)], order)
         return idx_out
     end
-    if !issorted(queries; order = order)
+    if !_take_sorted_path(queries, order, queries_sorted)
         return _searchsortedlast_unsorted_loop!(idx_out, v, queries, order)
     end
     gap, skewed = _estimate_avg_gap(v, queries, m)
@@ -1490,9 +1565,10 @@ end
 
 function _searchsortedfirst_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
-        strategy::SearchStrategy, order::Base.Order.Ordering
+        strategy::SearchStrategy, order::Base.Order.Ordering,
+        queries_sorted::Union{Nothing, Bool},
     )
-    return if issorted(queries; order = order)
+    return if _take_sorted_path(queries, order, queries_sorted)
         _searchsortedfirst_sorted_loop!(idx_out, v, queries, strategy, order)
     else
         _searchsortedfirst_unsorted_loop!(idx_out, v, queries, order)
@@ -1501,7 +1577,8 @@ end
 
 function _searchsortedfirst_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
-        s::Auto, order::Base.Order.Ordering
+        s::Auto, order::Base.Order.Ordering,
+        queries_sorted::Union{Nothing, Bool},
     )
     m = length(queries)
     m == 0 && return idx_out
@@ -1510,7 +1587,7 @@ function _searchsortedfirst_batched!(
             searchsortedfirst(v, queries[firstindex(queries)], order)
         return idx_out
     end
-    if !issorted(queries; order = order)
+    if !_take_sorted_path(queries, order, queries_sorted)
         return _searchsortedfirst_unsorted_loop!(idx_out, v, queries, order)
     end
     gap, skewed = _estimate_avg_gap(v, queries, m)
@@ -1678,6 +1755,53 @@ Base.@propagate_inbounds function searchsortedfirstexp(
         ind = lo + tn2
     end
     return searchsortedfirst(v, x, lo + tn2 - tn2m1, hi, Base.Order.Forward)
+end
+
+# ---------------------------------------------------------------------------
+# Range search through the strategy dispatch
+# ---------------------------------------------------------------------------
+
+"""
+    searchsortedrange(strategy, v, lo, hi[, hint]; order = Base.Order.Forward)
+        -> UnitRange{Int}
+
+Return the index range of all entries `v[i]` satisfying `lo ≤ v[i] ≤ hi`
+under `order`. Equivalent to
+`searchsortedfirst(strategy, v, lo[, hint]; order) :
+ searchsortedlast(strategy, v, hi[, hint]; order)` but expressed as a
+single call that may share bracket-discovery work between the two
+endpoints when the underlying strategy allows it.
+
+The empty range case (no `v[i]` lies in `[lo, hi]`) returns
+`searchsortedfirst(strategy, v, lo) : (searchsortedfirst(strategy, v, lo) - 1)`,
+matching `Base.searchsorted(v, lo)` for an absent value.
+
+When a `hint` is supplied it is used for both endpoint searches. Strategies
+that ignore the hint (`BinaryBracket`, `InterpolationSearch`) treat the
+hinted form as a pass-through.
+"""
+@inline function searchsortedrange(
+        strategy::SearchStrategy, v::AbstractVector, lo, hi;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    first_idx = searchsortedfirst(strategy, v, lo; order = order)
+    last_idx = searchsortedlast(strategy, v, hi; order = order)
+    return first_idx:last_idx
+end
+
+@inline function searchsortedrange(
+        strategy::SearchStrategy, v::AbstractVector, lo, hi, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    first_idx = searchsortedfirst(strategy, v, lo, hint; order = order)
+    # `last_idx` searches *forward* from `first_idx` if the hint suggests it
+    # (lo ≤ hi means the right endpoint is ≥ first_idx). Use first_idx as a
+    # hint to skip work shared with the left search; falls back to the
+    # supplied hint for strategies that ignore the integer hint.
+    last_idx = searchsortedlast(
+        strategy, v, hi, max(first_idx, hint); order = order
+    )
+    return first_idx:last_idx
 end
 
 # ---------------------------------------------------------------------------

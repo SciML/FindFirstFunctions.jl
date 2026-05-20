@@ -346,7 +346,7 @@ end
             # because InterpolationSearch's bad guess just makes BracketGallop
             # wider, never incorrect.
             v_log = exp.(range(0.0, 10.0; length = 4096))
-            lying = SearchProperties(true, true, false)
+            lying = SearchProperties(true, true, false, false)
             tt_log = sort!(rand(StableRNG(11), 8) .* (v_log[end] - v_log[1]) .+ v_log[1])
             out_lying = Vector{Int}(undef, length(tt_log))
             searchsortedlast!(out_lying, v_log, tt_log; strategy = Auto(lying))
@@ -354,6 +354,26 @@ end
 
             # Bits-ness: SearchProperties must be isbits so it doesn't allocate.
             @test isbitstype(SearchProperties)
+
+            # is_log_linear field: populated by SearchProperties(v) on
+            # geometric data, rejected on linear / two-scale data.
+            v_log = collect(exp.(range(0.0, log(1.0e6); length = 65536)))
+            p_log = SearchProperties(v_log)
+            @test p_log.is_log_linear
+
+            v_lin = collect(0.0:0.001:65.0)
+            p_lin = SearchProperties(v_lin)
+            @test !p_lin.is_log_linear
+
+            # Two-scale data should fail both linearity probes.
+            v_2s = sort!(vcat(range(0.0, 1.0; length = 32768), range(1.0, 100.0; length = 32768)))
+            p_2s = SearchProperties(v_2s)
+            @test !p_2s.is_log_linear
+
+            # is_log_linear requires strictly positive v; mixed-sign rejects.
+            v_signed = collect(-100.0:0.001:65.0)
+            p_signed = SearchProperties(v_signed)
+            @test !p_signed.is_log_linear
         end
 
         @safetestset "Batched in-place searchsorted!" begin
@@ -442,6 +462,83 @@ end
                 searchsortedlast!(outr, r, x_sorted; strategy = strategy)
                 @test outr == searchsortedlast.(Ref(r), x_sorted)
             end
+        end
+
+        @safetestset "searchsortedrange" begin
+            using FindFirstFunctions, StableRNGs
+            v = collect(0.0:0.5:50.0)
+            # Compare against Base composition for several (lo, hi) pairs.
+            for (lo, hi) in [
+                    (5.0, 7.0), (0.0, 100.0), (-1.0, 5.5), (10.0, 10.0),
+                    (45.0, 60.0), (51.0, 100.0),
+                ]
+                expected = searchsortedfirst(v, lo):searchsortedlast(v, hi)
+                for strategy in (
+                        Auto(), BinaryBracket(), BracketGallop(), LinearScan(),
+                        InterpolationSearch(), ExpFromLeft(), SIMDLinearScan(),
+                    )
+                    @test searchsortedrange(strategy, v, lo, hi) == expected
+                    # Hinted form.
+                    h = clamp(searchsortedfirst(v, lo), 1, length(v))
+                    @test searchsortedrange(strategy, v, lo, hi, h) == expected
+                end
+            end
+            # Random fuzz on Int64.
+            rng = StableRNG(2026)
+            vi = sort!(rand(rng, Int64(-100):Int64(100), 200))
+            for _ in 1:200
+                lo, hi = sort([rand(rng, Int64(-110):Int64(110)) for _ in 1:2])
+                want = searchsortedfirst(vi, lo):searchsortedlast(vi, hi)
+                @test searchsortedrange(Auto(), vi, lo, hi) == want
+                @test searchsortedrange(BracketGallop(), vi, lo, hi, 100) == want
+            end
+            # Type stability: result is UnitRange{Int}.
+            @test typeof(searchsortedrange(Auto(), v, 5.0, 7.0)) === UnitRange{Int}
+        end
+
+        @safetestset "queries_sorted kwarg" begin
+            using FindFirstFunctions, StableRNGs
+            v = collect(0.0:0.5:100.0)
+            rng = StableRNG(2026)
+            sorted_q = sort!(rand(rng, 64) .* 100.0)
+            unsorted_q = rand(rng, 64) .* 100.0
+            out = Vector{Int}(undef, 64)
+            expected_sorted = searchsortedlast.(Ref(v), sorted_q)
+            expected_unsorted = searchsortedlast.(Ref(v), unsorted_q)
+
+            # Default behaviour (nothing) — runtime issorted check.
+            searchsortedlast!(out, v, sorted_q; strategy = Auto())
+            @test out == expected_sorted
+            searchsortedlast!(out, v, unsorted_q; strategy = Auto())
+            @test out == expected_unsorted
+
+            # Explicit queries_sorted = true: trust the caller's sortedness.
+            searchsortedlast!(out, v, sorted_q; strategy = Auto(), queries_sorted = true)
+            @test out == expected_sorted
+            # Across every shipped strategy.
+            for strategy in (
+                    LinearScan(), SIMDLinearScan(), BracketGallop(),
+                    ExpFromLeft(), InterpolationSearch(), BinaryBracket(),
+                )
+                searchsortedlast!(
+                    out, v, sorted_q;
+                    strategy = strategy, queries_sorted = true
+                )
+                @test out == expected_sorted
+                searchsortedfirst!(
+                    out, v, sorted_q;
+                    strategy = strategy, queries_sorted = true
+                )
+                @test out == searchsortedfirst.(Ref(v), sorted_q)
+            end
+
+            # Explicit queries_sorted = false: take the unsorted-loop path
+            # unconditionally, even on sorted input — answers must still be
+            # correct (the unsorted loop is per-query unhinted Base call).
+            searchsortedlast!(out, v, sorted_q; strategy = Auto(), queries_sorted = false)
+            @test out == expected_sorted
+            searchsortedlast!(out, v, unsorted_q; strategy = Auto(), queries_sorted = false)
+            @test out == expected_unsorted
         end
 
         @safetestset "SIMDLinearScan correctness" begin
