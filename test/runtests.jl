@@ -383,6 +383,98 @@ end
                 @test outr == searchsortedlast.(Ref(r), x_sorted)
             end
         end
+
+        @safetestset "SIMDLinearScan correctness" begin
+            using FindFirstFunctions, StableRNGs
+            F = FindFirstFunctions
+
+            @testset "Int64 fuzz vs Base" begin
+                rng = StableRNG(2026)
+                for _ in 1:5_000
+                    n = rand(rng, 1:512)
+                    v = sort!(rand(rng, Int64(-1000):Int64(1000), n))
+                    x = rand(rng, Int64(-1100):Int64(1100))
+                    hint = rand(rng, 1:n)
+                    @test searchsortedlast(F.SIMDLinearScan(), v, x, hint) ==
+                        searchsortedlast(v, x)
+                    @test searchsortedfirst(F.SIMDLinearScan(), v, x, hint) ==
+                        searchsortedfirst(v, x)
+                end
+            end
+
+            @testset "Float64 fuzz vs Base" begin
+                rng = StableRNG(2027)
+                for _ in 1:5_000
+                    n = rand(rng, 1:512)
+                    v = sort!(randn(rng, n))
+                    x = (rand(rng) - 0.5) * 6
+                    hint = rand(rng, 1:n)
+                    @test searchsortedlast(F.SIMDLinearScan(), v, x, hint) ==
+                        searchsortedlast(v, x)
+                    @test searchsortedfirst(F.SIMDLinearScan(), v, x, hint) ==
+                        searchsortedfirst(v, x)
+                end
+            end
+
+            @testset "Edge cases (Int64)" begin
+                v = collect(Int64, 1:100)
+                # Out-of-range hint is clamped.
+                @test searchsortedlast(F.SIMDLinearScan(), v, Int64(50), -5) == 50
+                @test searchsortedlast(F.SIMDLinearScan(), v, Int64(50), 1_000) == 50
+                # x below/above the range.
+                @test searchsortedlast(F.SIMDLinearScan(), v, Int64(-10), 50) == 0
+                @test searchsortedlast(F.SIMDLinearScan(), v, Int64(1_000), 50) == 100
+                @test searchsortedfirst(F.SIMDLinearScan(), v, Int64(-10), 50) == 1
+                @test searchsortedfirst(F.SIMDLinearScan(), v, Int64(1_000), 50) == 101
+                # Empty and single-element vectors.
+                vempty = Int64[]
+                @test searchsortedlast(F.SIMDLinearScan(), vempty, Int64(5), 1) == 0
+                @test searchsortedfirst(F.SIMDLinearScan(), vempty, Int64(5), 1) == 1
+                v1 = Int64[42]
+                @test searchsortedlast(F.SIMDLinearScan(), v1, Int64(42), 1) == 1
+                @test searchsortedfirst(F.SIMDLinearScan(), v1, Int64(42), 1) == 1
+                # Duplicates.
+                vd = Int64[1, 2, 2, 2, 5]
+                @test searchsortedlast(F.SIMDLinearScan(), vd, Int64(2), 1) == 4
+                @test searchsortedfirst(F.SIMDLinearScan(), vd, Int64(2), 5) == 2
+            end
+
+            @testset "Fallback: non-Int64/Float64 eltypes" begin
+                # Int32 vectors must hit the generic LinearScan fallback,
+                # not the Int64 SIMD primitive.
+                v32 = Int32[1, 5, 10, 20, 50, 100, 200]
+                for x in (Int32(0), Int32(7), Int32(20), Int32(300))
+                    for hint in 1:length(v32)
+                        @test searchsortedlast(F.SIMDLinearScan(), v32, x, hint) ==
+                            searchsortedlast(v32, x)
+                        @test searchsortedfirst(F.SIMDLinearScan(), v32, x, hint) ==
+                            searchsortedfirst(v32, x)
+                    end
+                end
+                # Float32 same.
+                v32f = Float32[1.0, 5.0, 10.0, 20.0, 50.0]
+                for x in (Float32(0.0), Float32(7.0), Float32(20.0), Float32(100.0))
+                    @test searchsortedlast(F.SIMDLinearScan(), v32f, x, 2) ==
+                        searchsortedlast(v32f, x)
+                end
+                # Non-numeric.
+                vs = sort!(["alpha", "beta", "gamma", "delta", "epsilon"])
+                @test searchsortedlast(F.SIMDLinearScan(), vs, "gamma", 2) ==
+                    searchsortedlast(vs, "gamma")
+            end
+
+            @testset "Fallback: no hint, reverse order" begin
+                v = collect(Int64, 1:100)
+                # No hint → BinaryBracket.
+                @test searchsortedlast(F.SIMDLinearScan(), v, Int64(50)) ==
+                    searchsortedlast(v, Int64(50))
+                # Reverse order → scalar LinearScan.
+                v_rev = collect(Int64, 100:-1:1)
+                @test searchsortedlast(
+                    F.SIMDLinearScan(), v_rev, Int64(50), 1; order = Base.Order.Reverse
+                ) == searchsortedlast(v_rev, Int64(50), Base.Order.Reverse)
+            end
+        end
     end
 
     if GROUP == "QA"

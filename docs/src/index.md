@@ -1,68 +1,56 @@
 # FindFirstFunctions.jl
 
-FindFirstFunctions.jl is a library for accelerated `findfirst` type functions.
+FindFirstFunctions.jl is a library of accelerated `findfirst`-style and
+sorted-search routines. The package provides:
+
+  - A **strategy-dispatched** sorted-search API: a single pair of
+    `Base.searchsortedfirst` / `Base.searchsortedlast` overloads that take a
+    [`SearchStrategy`](@ref FindFirstFunctions.SearchStrategy) as the first
+    positional argument.
+  - **Batched** in-place lookups
+    [`searchsortedfirst!`](@ref FindFirstFunctions.searchsortedfirst!) /
+    [`searchsortedlast!`](@ref FindFirstFunctions.searchsortedlast!) that pick
+    a strategy automatically.
+  - **Guessers** that supply per-vector hints based on linear extrapolation
+    or a cached previous result.
+  - **Equality search** via [`findfirstequal`](@ref FindFirstFunctions.findfirstequal)
+    and [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal).
 
 ## Installation
-
-To install FindFirstFunctions.jl, use the Julia package manager:
 
 ```julia
 using Pkg
 Pkg.add("FindFirstFunctions")
 ```
 
-## Sorted-search API
+## Guide
 
-The public sorted-search surface in 2.x is a single pair of generic functions —
-`Base.searchsortedfirst` and `Base.searchsortedlast` — overloaded to take a
-[`SearchStrategy`](@ref FindFirstFunctions.SearchStrategy) as the first
-positional argument:
+  - [Interface and extension rules](@ref) — the public API surface, the
+    contract a `SearchStrategy` subtype must satisfy, and how to add a new
+    one.
+  - [Search strategies](@ref) — catalog of the built-in strategies, when each
+    one is fast, and when it falls back to plain binary search.
+  - [Guessers](@ref) — the [`Guesser`](@ref FindFirstFunctions.Guesser) type
+    and how to plug it into the strategy dispatch via
+    [`GuesserHint`](@ref FindFirstFunctions.GuesserHint).
+  - [Auto: heuristics and benchmarks](@ref) — what
+    [`Auto`](@ref FindFirstFunctions.Auto) picks in every regime, the
+    crossover constants, and the benchmark script that validates them.
+
+## Quick example
 
 ```julia
-searchsortedfirst(strategy, v, x[, hint]; order = Base.Order.Forward)
-searchsortedlast(strategy, v, x[, hint]; order = Base.Order.Forward)
-```
+using FindFirstFunctions
 
-For batched lookups, use the in-place [`searchsortedfirst!`](@ref FindFirstFunctions.searchsortedfirst!) /
-[`searchsortedlast!`](@ref FindFirstFunctions.searchsortedlast!) variants.
-They pick a strategy automatically via [`Auto`](@ref FindFirstFunctions.Auto)
-by default, or you can pass `strategy = …` to opt into a specific algorithm.
+v = collect(0.0:0.1:10.0)
+queries = sort!(rand(100) .* 10)
 
-[`Guesser`](@ref FindFirstFunctions.Guesser) supplies a hint based on either a
-linear-extrapolation lookup (when `v` is roughly evenly spaced) or a cached
-previous result; pass it through [`GuesserHint`](@ref FindFirstFunctions.GuesserHint)
-to use it with the dispatched API.
+# Single query with a hint.
+i = searchsortedlast(BracketGallop(), v, 3.14, 30)
 
-```@docs
-FindFirstFunctions.searchsortedfirst!
-FindFirstFunctions.searchsortedlast!
-```
-
-## Sorted-search strategies
-
-```@docs
-FindFirstFunctions.SearchStrategy
-FindFirstFunctions.LinearScan
-FindFirstFunctions.BracketGallop
-FindFirstFunctions.ExpFromLeft
-FindFirstFunctions.InterpolationSearch
-FindFirstFunctions.BinaryBracket
-FindFirstFunctions.GuesserHint
-FindFirstFunctions.Auto
-```
-
-## Hint provider and helpers
-
-```@docs
-FindFirstFunctions.Guesser
-FindFirstFunctions.looks_linear
-```
-
-## Equality search
-
-```@docs
-FindFirstFunctions.findfirstequal
-FindFirstFunctions.findfirstsortedequal
+# Batched, with strategy chosen by Auto.
+idx = Vector{Int}(undef, length(queries))
+searchsortedlast!(idx, v, queries)
 ```
 
 ## Contributing

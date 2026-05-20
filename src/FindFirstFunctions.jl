@@ -87,6 +87,114 @@ function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
     return ret < 0 ? nothing : ret + 1
 end
 
+# Generate the SIMD "find first lane matching predicate" IR for an arbitrary
+# scalar type and LLVM compare predicate. Modelled on `FFE_IR` (the equality
+# scan): load 8 lanes at a time, compare against a broadcast of the search
+# value, bitcast the i1×8 mask to i8, `cttz` to find the first set bit. The
+# tail past the last full chunk is handled scalar-wise.
+function _simd_scan_ir(t, pred)
+    cmp = pred[1] in ('o', 'u') ? "fcmp" : "icmp"
+    return """
+    declare i8 @llvm.cttz.i8(i8, i1);
+    define i64 @entry($t %0, $(USE_PTR ? "ptr" : "i64") %1, i64 %2) #0 {
+    top:
+      $(USE_PTR ? "" : "%ivars = inttoptr i64 %1 to $t*")
+      %btmp = insertelement <8 x $t> undef, $t %0, i64 0
+      %var = shufflevector <8 x $t> %btmp, <8 x $t> undef, <8 x i32> zeroinitializer
+      %lenm7 = add nsw i64 %2, -7
+      %dosimditer = icmp ugt i64 %2, 7
+      br i1 %dosimditer, label %L9.lr.ph, label %L32
+
+    L9.lr.ph:
+      %len8 = and i64 %2, 9223372036854775800
+      br label %L9
+
+    L9:
+      %i = phi i64 [ 0, %L9.lr.ph ], [ %vinc, %L30 ]
+      %ivarsi = getelementptr inbounds $t, $(USE_PTR ? "ptr %1" : "$t* %ivars"), i64 %i
+      $(USE_PTR ? "" : "%vpvi = bitcast $t* %ivarsi to <8 x $t>*")
+      %v = load <8 x $t>, $(USE_PTR ? "ptr %ivarsi" : "<8 x $t> * %vpvi"), align 8
+      %m = $cmp $pred <8 x $t> %v, %var
+      %mu = bitcast <8 x i1> %m to i8
+      %matchnotfound = icmp eq i8 %mu, 0
+      br i1 %matchnotfound, label %L30, label %L17
+
+    L17:
+      %tz8 = call i8 @llvm.cttz.i8(i8 %mu, i1 true)
+      %tz64 = zext i8 %tz8 to i64
+      %vis = add nuw i64 %i, %tz64
+      br label %common.ret
+
+    common.ret:
+      %retval = phi i64 [ %vis, %L17 ], [ -1, %L32 ], [ %si, %L51 ], [ -1, %L67 ]
+      ret i64 %retval
+
+    L30:
+      %vinc = add nuw nsw i64 %i, 8
+      %continue = icmp slt i64 %vinc, %lenm7
+      br i1 %continue, label %L9, label %L32
+
+    L32:
+      %cumi = phi i64 [ 0, %top ], [ %len8, %L30 ]
+      %done = icmp eq i64 %cumi, %2
+      br i1 %done, label %common.ret, label %L51
+
+    L51:
+      %si = phi i64 [ %inc, %L67 ], [ %cumi, %L32 ]
+      %spi = getelementptr inbounds $t, $(USE_PTR ? "ptr %1" : "$t* %ivars"), i64 %si
+      %svi = load $t, $(USE_PTR ? "ptr" : "$t*") %spi, align 8
+      %match = $cmp $pred $t %svi, %0
+      br i1 %match, label %common.ret, label %L67
+
+    L67:
+      %inc = add i64 %si, 1
+      %dobreak = icmp eq i64 %inc, %2
+      br i1 %dobreak, label %common.ret, label %L51
+
+    }
+    attributes #0 = { alwaysinline }
+    """
+end
+
+const _SIMD_GT_I64_IR = _simd_scan_ir("i64", "sgt")
+const _SIMD_GE_I64_IR = _simd_scan_ir("i64", "sge")
+const _SIMD_GT_F64_IR = _simd_scan_ir("double", "ogt")
+const _SIMD_GE_F64_IR = _simd_scan_ir("double", "oge")
+
+# Backing primitives for SIMDLinearScan. Each returns the 0-based offset of
+# the first lane satisfying the predicate, or -1 if none. Caveat: NaN inputs
+# always compare false under the ordered `o*` float predicates, so NaN in `v`
+# or `x` produces "no match" rather than an exception — consistent with the
+# undefined-input contract for sorted Float64 vectors containing NaN.
+function _simd_first_gt(x::Int64, ptr::Ptr{Int64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_GT_I64_IR, "entry"),
+        Int64, Tuple{Int64, Ptr{Int64}, Int64},
+        x, ptr, len
+    )
+end
+function _simd_first_ge(x::Int64, ptr::Ptr{Int64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_GE_I64_IR, "entry"),
+        Int64, Tuple{Int64, Ptr{Int64}, Int64},
+        x, ptr, len
+    )
+end
+function _simd_first_gt(x::Float64, ptr::Ptr{Float64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_GT_F64_IR, "entry"),
+        Int64, Tuple{Float64, Ptr{Float64}, Int64},
+        x, ptr, len
+    )
+end
+function _simd_first_ge(x::Float64, ptr::Ptr{Float64}, len::Int64)
+    return Base.llvmcall(
+        (_SIMD_GE_F64_IR, "entry"),
+        Int64, Tuple{Float64, Ptr{Float64}, Int64},
+        x, ptr, len
+    )
+end
+
 """
 findfirstsortedequal(vars::DenseVector{Int64}, var::Int64)::Union{Int64,Nothing}
 
@@ -190,6 +298,9 @@ called with a strategy as the first positional argument:
 
   - [`LinearScan`](@ref) walks ±1 from the hint. Cheapest when the target is
     within a few positions of the hint; degrades linearly otherwise.
+  - [`SIMDLinearScan`](@ref) is `LinearScan` with the forward walk lowered to
+    8-wide SIMD chunks for `DenseVector{Int64}` and `DenseVector{Float64}`.
+    Falls back to plain [`LinearScan`](@ref) for any other element type.
   - [`BracketGallop`](@ref) expands an exponential bracket bidirectionally
     from the hint, then binary-searches inside it. Effectively O(1) when the
     target is near the hint; never worse than ~2 log₂ n comparisons.
@@ -217,6 +328,33 @@ Walk ±1 from the hint. Best when the target is within a few positions of the
 hint. Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
 """
 struct LinearScan <: SearchStrategy end
+
+"""
+    SIMDLinearScan <: SearchStrategy
+
+Variant of [`LinearScan`](@ref) whose forward walk is lowered to 8-wide
+SIMD chunks via custom LLVM IR. Specialized for `DenseVector{Int64}` and
+`DenseVector{Float64}`; for any other element type, falls back to plain
+[`LinearScan`](@ref). The backward walk (when the hint is past the
+answer) uses the scalar `LinearScan` path regardless of element type.
+
+Wins on long forward walks (≥ 8 elements past the hint). For walks of
+1–3 elements `LinearScan` is comparable — the SIMD chunk has constant
+setup overhead. Worst case is O(n / 8) which is still linear, so
+`SIMDLinearScan` is only `Auto`-relevant for small `n` or small-gap
+batches where plain `LinearScan` would have been picked anyway.
+
+Caveats:
+  - Element type must be exactly `Int64` or `Float64`. `Int32`,
+    `UInt64`, `Float32`, and user-defined numeric types all fall back to
+    scalar.
+  - Sorted-Float64 vectors containing `NaN` produce undefined results,
+    same as for any positional search on a vector that isn't totally
+    ordered.
+  - Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
+  - Falls back to [`LinearScan`](@ref) for non-`Forward` orderings.
+"""
+struct SIMDLinearScan <: SearchStrategy end
 
 """
     BracketGallop <: SearchStrategy
@@ -457,6 +595,109 @@ Base.searchsortedlast(
 ) = searchsortedlast(BinaryBracket(), v, x; order = order)
 Base.searchsortedfirst(
     s::LinearScan, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Strategy: SIMDLinearScan — specialized forward walk for DenseVector{Int64}
+# and DenseVector{Float64}. Backward walks reuse the scalar LinearScan path
+# (rare from a good hint, and the SIMD primitive only exists for the
+# forward-scan direction).
+
+@inline function _simdscan_last_specialized(
+        v::Union{DenseVector{Int64}, DenseVector{Float64}}, x, hint::Integer
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo - 1
+    i = clamp(hint, lo, hi)
+    @inbounds vi = v[i]
+    if vi > x
+        # Backward walk (scalar).
+        while i > lo
+            i -= 1
+            @inbounds v[i] <= x && return i
+        end
+        return lo - 1
+    end
+    i == hi && return hi
+    start = i + 1
+    len = hi - start + 1
+    offset = GC.@preserve v _simd_first_gt(x, pointer(v, start), Int64(len))
+    return offset < 0 ? hi : (start + offset) - 1
+end
+
+@inline function _simdscan_first_specialized(
+        v::Union{DenseVector{Int64}, DenseVector{Float64}}, x, hint::Integer
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo
+    i = clamp(hint, lo, hi)
+    @inbounds vi = v[i]
+    if vi < x
+        i == hi && return hi + 1
+        start = i + 1
+        len = hi - start + 1
+        offset = GC.@preserve v _simd_first_ge(x, pointer(v, start), Int64(len))
+        return offset < 0 ? hi + 1 : start + offset
+    end
+    while i > lo
+        @inbounds v[i - 1] >= x && (i -= 1; continue)
+        return i
+    end
+    return lo
+end
+
+function Base.searchsortedlast(
+        ::SIMDLinearScan, v::DenseVector{Int64}, x::Int64, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    order === Base.Order.Forward ||
+        return searchsortedlast(LinearScan(), v, x, hint; order = order)
+    return _simdscan_last_specialized(v, x, hint)
+end
+function Base.searchsortedlast(
+        ::SIMDLinearScan, v::DenseVector{Float64}, x::Float64, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    order === Base.Order.Forward ||
+        return searchsortedlast(LinearScan(), v, x, hint; order = order)
+    return _simdscan_last_specialized(v, x, hint)
+end
+function Base.searchsortedfirst(
+        ::SIMDLinearScan, v::DenseVector{Int64}, x::Int64, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    order === Base.Order.Forward ||
+        return searchsortedfirst(LinearScan(), v, x, hint; order = order)
+    return _simdscan_first_specialized(v, x, hint)
+end
+function Base.searchsortedfirst(
+        ::SIMDLinearScan, v::DenseVector{Float64}, x::Float64, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward
+    )
+    order === Base.Order.Forward ||
+        return searchsortedfirst(LinearScan(), v, x, hint; order = order)
+    return _simdscan_first_specialized(v, x, hint)
+end
+
+# Other eltypes fall back to the scalar LinearScan walk.
+Base.searchsortedlast(
+    ::SIMDLinearScan, v::AbstractVector, x, hint::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(LinearScan(), v, x, hint; order = order)
+Base.searchsortedfirst(
+    ::SIMDLinearScan, v::AbstractVector, x, hint::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedfirst(LinearScan(), v, x, hint; order = order)
+
+# No hint → BinaryBracket.
+Base.searchsortedlast(
+    ::SIMDLinearScan, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::SIMDLinearScan, v::AbstractVector, x;
     order::Base.Order.Ordering = Base.Order.Forward
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
@@ -1105,11 +1346,16 @@ using PrecompileTools: @compile_workload, @setup_workload
 
         # Strategy dispatch — single-query forms across the standard strategies.
         for strategy in (
-                LinearScan(), BracketGallop(), ExpFromLeft(),
+                LinearScan(), SIMDLinearScan(), BracketGallop(), ExpFromLeft(),
                 InterpolationSearch(), BinaryBracket(), Auto(),
             )
             searchsortedfirst(strategy, vec_int64, Int64(8), Int64(1))
             searchsortedlast(strategy, vec_int64, Int64(8), Int64(1))
+        end
+        # SIMDLinearScan's Float64 specialization.
+        let vec_f64 = collect(1.0:1.0:16.0)
+            searchsortedfirst(SIMDLinearScan(), vec_f64, 8.0, 1)
+            searchsortedlast(SIMDLinearScan(), vec_f64, 8.0, 1)
         end
         searchsortedfirst(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
         searchsortedlast(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
