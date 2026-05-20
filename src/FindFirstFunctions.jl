@@ -568,17 +568,53 @@ const _AUTO_LINEAR_THRESHOLD = 16
 # initial linear probes are wasted when the gap is already 0 or 1).
 # Above 4, ExpFromLeft handles arbitrary gap sizes via doubling — the
 # bench sweep shows it strictly beats BracketGallop for forward-moving
-# sorted queries.
+# sorted queries at gap < ~16.
 const _AUTO_BATCH_LINEAR_GAP = 4
 
 # For sparse queries (gap large) on long vectors, InterpolationSearch can
 # beat ExpFromLeft by ~2× on uniformly-spaced data. The sampled-linearity
-# check below is O(1) — 5 fixed probes — so it's cheap enough to run inside
-# Auto when there's a real chance of unlocking InterpolationSearch.
+# check below is O(1) — 9 probes — so it's cheap enough to run inside Auto
+# when there's a real chance of unlocking InterpolationSearch.
 const _AUTO_INTERP_MIN_GAP = 8
 const _AUTO_INTERP_MIN_N = 1024
 const _AUTO_INTERP_MIN_M = 2
 const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
+
+# Very-sparse override: when the gap is large enough that ExpFromLeft's
+# log₂(gap) doubling levels approach InterpolationSearch's log₂(n) worst-case
+# binary refinement, InterpolationSearch's better cache behaviour (one
+# extrapolation jump + local refine vs. many doubling probes across the
+# array) wins even on non-strictly-linear data — random-sorted vectors
+# included, because their order statistics deviate from a straight line by
+# O(√n)/n, which is much less than the gap-related cost difference.
+#
+# At gap ≥ 256, a looser linearity tolerance is used. This still rejects
+# genuinely-nonlinear `v` (log-spaced, two-scale), where the bench shows
+# InterpolationSearch losing 2–3× to ExpFromLeft, but accepts approximately
+# linear data (random_sorted, jittered) where the order-statistic variance
+# is well below the loose threshold.
+const _AUTO_INTERP_LOOSE_GAP = 256
+const _AUTO_LINEAR_LOOSE_TOLERANCE = 5.0e-2
+
+# SIMDLinearScan wins in the medium-gap regime on `DenseVector{Int64}` and
+# `DenseVector{Float64}` — 24% of cells in the bench sweep, with median
+# 1.94× speedup over plain LinearScan. The threshold is eltype-specific:
+#   - Float64: gap ∈ (4, 64]. fcmp is heavier than icmp, so SIMD's 8-wide
+#     vector compare wins over the scalar walk at a higher gap than for
+#     integers. Bench shows SIMD winning consistently through gap ≈ 64.
+#   - Int64: gap ∈ (4, 16]. The scalar icmp loop is so tight that SIMD's
+#     constant per-call setup dominates above gap ≈ 16. Bench shows
+#     LinearScan recapturing the win above that crossover.
+@inline _auto_simd_gap_max(::DenseVector{Int64}) = 64
+@inline _auto_simd_gap_max(::DenseVector{Float64}) = 64
+@inline _auto_simd_gap_max(::AbstractVector) = 0   # not SIMD-eligible
+
+# When InterpolationSearch isn't eligible and the gap is large, BracketGallop
+# beats ExpFromLeft because the 5 linear probes ExpFromLeft does upfront
+# are wasted (no chance the answer is within 5 of `hint = prev_result` when
+# the gap is hundreds or thousands). BracketGallop just starts doubling
+# immediately. The bench sweep shows this crossover at gap ≈ 16.
+const _AUTO_GALLOP_GAP_MIN = 16
 
 # Sampled linearity check: probes v[1], v[k*n/10] for k = 1..9, v[n] and
 # tests whether all interior points sit within `_AUTO_LINEAR_REL_TOLERANCE`
@@ -1023,10 +1059,21 @@ end
 
 # Returns `(gap, skewed)`: the estimated average step in `v`'s index space
 # between consecutive query results, plus a flag that's true when the
-# queries' distribution is non-uniform within their span. The skew flag is
-# what lets Auto reject InterpolationSearch even when the gap is large:
-# `ExpFromLeft` from `prev_idx` wins on skewed queries because consecutive
-# queries land in the same neighbourhood, regardless of `v` being linear.
+# queries' distribution is non-uniform within their span. The two pieces of
+# information serve different roles in Auto's decision tree:
+#
+#   - `gap` is the per-query cost driver. We always use the span-based
+#     estimate `n * span(queries) / span(v) / m` so that tightly-clustered
+#     queries (span_q ≈ 0) report gap ≈ 0 regardless of `n/m`. The earlier
+#     `n / m` fallback for skewed queries was wrong: it caused `SIMDLinearScan`
+#     to be picked for clustered queries where LinearScan's tiny scalar
+#     walk is 5× faster (e.g. clustered queries with span_q = 1 over an
+#     `n = 65536` vector).
+#   - `skewed` is an InterpolationSearch-suitability flag. When the median
+#     query sits well off the midpoint of `queries[1]..queries[end]`, the
+#     queries are clustered within their span and the per-call linear
+#     extrapolation guess is worse than the previous-result hint that
+#     `ExpFromLeft` would use.
 @inline function _estimate_avg_gap(
         v::AbstractVector{<:Number}, queries::AbstractVector{<:Number}, m::Integer
     )
@@ -1053,13 +1100,10 @@ end
             skewed = true
         end
     end
-    if skewed
-        return (n ÷ max(1, m), true)
-    end
     ratio = span_q / span_v
     # Clamp ratio: queries may extend outside v's range (extrapolation).
     ratio = clamp(ratio, zero(ratio), one(ratio))
-    return (floor(Int, n * ratio / max(1, m)), false)
+    return (floor(Int, n * ratio / max(1, m)), skewed)
 end
 
 # Non-numeric eltypes: no span subtraction possible, fall back to length ratio
@@ -1250,25 +1294,76 @@ function _searchsortedlast_batched!(
             idx_out, v, queries, LinearScan(), order
         )
     end
+    # Medium-gap regime: SIMDLinearScan wins on `DenseVector{Int64}` and
+    # `DenseVector{Float64}` (without NaN). For Float64, NaN presence is
+    # taken from `s.props.has_nan` if `SearchProperties(v)` was constructed,
+    # else we assume no NaN (consistent with the existing contract that
+    # `Base.searchsortedlast` doesn't check sortedness either).
+    if gap <= _auto_simd_gap_max(v) &&
+            _auto_simd_eligible(v, s.props)
+        return _searchsortedlast_sorted_loop!(
+            idx_out, v, queries, SIMDLinearScan(), order
+        )
+    end
     # Sparse-on-large-linear: InterpolationSearch wins ~2× over ExpFromLeft
     # on uniformly-spaced data — but only when queries are *also* spread
     # roughly uniformly within their span. For skewed (clustered) queries,
     # `ExpFromLeft` from `prev_idx` wins even on linear v because the next
     # query's true index is close to the previous one's.
-    is_linear = s.props.has_props ? s.props.is_linear : _sampled_looks_linear(v)
     if !skewed &&
             gap >= _AUTO_INTERP_MIN_GAP &&
             length(v) >= _AUTO_INTERP_MIN_N &&
             m >= _AUTO_INTERP_MIN_M &&
-            is_linear
+            _auto_interp_eligible(v, s.props, gap)
         return _searchsortedlast_sorted_loop!(
             idx_out, v, queries, InterpolationSearch(), order
+        )
+    end
+    # Sparse fallback: BracketGallop beats ExpFromLeft when the gap is large
+    # enough that ExpFromLeft's initial 5 linear probes are guaranteed to
+    # miss. BracketGallop starts doubling from one position past `hint`, so
+    # it skips the wasted linear preamble.
+    if gap >= _AUTO_GALLOP_GAP_MIN
+        return _searchsortedlast_sorted_loop!(
+            idx_out, v, queries, BracketGallop(), order
         )
     end
     return _searchsortedlast_sorted_loop!(
         idx_out, v, queries, ExpFromLeft(), order
     )
 end
+
+# InterpolationSearch eligibility: two-tier linearity check. For
+# `_AUTO_INTERP_MIN_GAP ≤ gap < _AUTO_INTERP_LOOSE_GAP` we require strict
+# linearity (`_AUTO_LINEAR_REL_TOLERANCE`, default 0.1%) — InterpolationSearch
+# is only worth the per-call cost on truly uniform data when ExpFromLeft is
+# also competitive. For `gap ≥ _AUTO_INTERP_LOOSE_GAP` we accept a looser
+# tolerance (`_AUTO_LINEAR_LOOSE_TOLERANCE`, default 5%) because the cache
+# benefit of one extrapolation jump + local refine compensates for a worse
+# guess, but we still reject genuinely nonlinear data (log-spaced,
+# two-scale) where InterpolationSearch loses 2–3× to ExpFromLeft.
+@inline function _auto_interp_eligible(v, props::SearchProperties, gap::Integer)
+    if gap >= _AUTO_INTERP_LOOSE_GAP
+        # Loose probe — even on cached props, the strict `is_linear` bit may
+        # already reflect a tighter threshold than we need here, so run the
+        # sampled probe at the loose tolerance regardless of cache state.
+        return _sampled_looks_linear(v, _AUTO_LINEAR_LOOSE_TOLERANCE)
+    end
+    return props.has_props ? props.is_linear : _sampled_looks_linear(v)
+end
+
+# SIMD eligibility check used by Auto's batched dispatch. The static type
+# test on `v` discriminates the `DenseVector{Int64}` / `DenseVector{Float64}`
+# cases that SIMDLinearScan supports. For Float64, NaN presence is taken
+# from cached `SearchProperties.has_nan` when available; otherwise we
+# assume no NaN — Base's positional search doesn't check sortedness either,
+# and the burden of supplying populated props is on the caller for
+# pathological inputs.
+@inline _auto_simd_eligible(v::DenseVector{Int64}, ::SearchProperties) = true
+@inline function _auto_simd_eligible(v::DenseVector{Float64}, p::SearchProperties)
+    return p.has_props ? !p.has_nan : true
+end
+@inline _auto_simd_eligible(::AbstractVector, ::SearchProperties) = false
 
 function _searchsortedfirst_batched!(
         idx_out, v::AbstractVector, queries::AbstractVector,
@@ -1301,14 +1396,24 @@ function _searchsortedfirst_batched!(
             idx_out, v, queries, LinearScan(), order
         )
     end
-    is_linear = s.props.has_props ? s.props.is_linear : _sampled_looks_linear(v)
+    if gap <= _auto_simd_gap_max(v) &&
+            _auto_simd_eligible(v, s.props)
+        return _searchsortedfirst_sorted_loop!(
+            idx_out, v, queries, SIMDLinearScan(), order
+        )
+    end
     if !skewed &&
             gap >= _AUTO_INTERP_MIN_GAP &&
             length(v) >= _AUTO_INTERP_MIN_N &&
             m >= _AUTO_INTERP_MIN_M &&
-            is_linear
+            _auto_interp_eligible(v, s.props, gap)
         return _searchsortedfirst_sorted_loop!(
             idx_out, v, queries, InterpolationSearch(), order
+        )
+    end
+    if gap >= _AUTO_GALLOP_GAP_MIN
+        return _searchsortedfirst_sorted_loop!(
+            idx_out, v, queries, BracketGallop(), order
         )
     end
     return _searchsortedfirst_sorted_loop!(

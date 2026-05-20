@@ -337,6 +337,50 @@ nothing, requiring `FindFirstFunctions.LinearScan()` qualification):
 API. Downstream code that previously qualified every call (most of the
 SciML ecosystem) continues to work — the qualified names still resolve.
 
+### Auto retuning with SIMDLinearScan integration
+
+`Auto`'s batched decision tree has been retuned based on a 1080-cell
+benchmark sweep covering 5 `v` patterns × 4 query patterns × 5 `n` sizes ×
+6 `m` sizes × 2 element types. The previous tree fell out of the bench
+sweep with median 1.18× / p95 2.09× / max 2.78× slack against the per-cell
+optimum; the retuned tree comes in at median 1.04× / p95 1.38× /
+max 2.18×.
+
+New branches and constants:
+
+  - `SIMDLinearScan` is now dispatched by `Auto` in the medium-gap regime
+    (`gap ∈ (4, _auto_simd_gap_max(v)]`) when `v` is `DenseVector{Int64}`
+    or `DenseVector{Float64}`. `_auto_simd_gap_max` is 64 for both eltypes.
+    For Float64 the dispatch consults `SearchProperties.has_nan` if
+    available; otherwise no-NaN is assumed, consistent with how
+    `Base.searchsortedlast` already trusts the input is sorted.
+  - `BracketGallop` is preferred over `ExpFromLeft` at `gap ≥ 16` (new
+    constant `_AUTO_GALLOP_GAP_MIN`). The five up-front linear probes of
+    `ExpFromLeft` are guaranteed to miss once the answer is more than five
+    elements past the previous-result hint, so the doubling-from-`hint`
+    walk of `BracketGallop` is strictly faster at large gaps.
+  - Tiered linearity probe for `InterpolationSearch`. The strict
+    `_AUTO_LINEAR_REL_TOLERANCE = 1e-3` still gates the
+    `_AUTO_INTERP_MIN_GAP ≤ gap < _AUTO_INTERP_LOOSE_GAP` (8 to 256) range
+    — only truly uniform data passes. For `gap ≥ _AUTO_INTERP_LOOSE_GAP`
+    (256), the loose `_AUTO_LINEAR_LOOSE_TOLERANCE = 5e-2` applies, which
+    accepts approximately linear data (sorted random, jittered) where the
+    O(√n)/n order-statistic deviation is well below 5 %. `InterpolationSearch`
+    still loses on log-spaced and two-scale at any gap, and the strict tier
+    catches those.
+
+Bug fix: `_estimate_avg_gap` no longer falls back to `n ÷ m` when the
+skew flag is set. The fallback caused `SIMDLinearScan` to be picked for
+tightly-clustered queries (span_q ≈ 0) where `LinearScan`'s scalar walk
+is 5× faster. The skew flag now serves its intended purpose as a binary
+InterpolationSearch-unsuitability signal, while the actual gap value is
+always the span-based estimate.
+
+Reproducibility: the full sweep is checked in at `bench/auto_sweep.jl`
+with an analysis helper at `bench/analyze.jl`. See `auto.md` for the
+decision tree, the per-regime winner distribution, and how to run the
+sweep locally.
+
 ### Cleanup: typo fix, FFE_IR unification, tolerance kwarg
 
   - Internal helper `bracketstrictlymontonic` renamed to

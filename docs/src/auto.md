@@ -33,27 +33,45 @@ or pathologically-spaced data it falls back to `n ÷ m`.
 m == 0                                       →  return out unchanged
 m == 1                                       →  one direct unhinted call
 queries unsorted                             →  unhinted Base.searchsortedlast loop
-gap ≤ 4                                      →  LinearScan        # _AUTO_BATCH_LINEAR_GAP
-gap ≥ 8 and n ≥ 1024 and m ≥ 2
-        and not skewed and looks-linear      →  InterpolationSearch
+gap ≤ 4                                      →  LinearScan
+4 < gap ≤ _auto_simd_gap_max(v)
+        AND SIMD-eligible (Int64/Float64)    →  SIMDLinearScan
+gap ≥ 8 AND n ≥ 1024 AND m ≥ 2
+        AND not skewed
+        AND linearity probe accepts          →  InterpolationSearch
+gap ≥ 16                                     →  BracketGallop
 otherwise                                    →  ExpFromLeft
 ```
 
-The "looks-linear" check is a tightened version of the `Guesser`'s
-`looks_linear` probe: it reads 11 elements at fixed positions and accepts
-when every interior point sits within 0.1% of the straight line through
-`v[1]` and `v[end]`. It runs in ~25 ns regardless of `n`. The tight
-tolerance is essential — at large `n` the order-statistic variance of
-random-sorted data is small enough that a 5% threshold would falsely pass
-on irregular data.
+`_auto_simd_gap_max(v)` is 64 for `DenseVector{Int64}` and `DenseVector{Float64}`,
+and 0 (never picked) for any other element type. For Float64 the SIMD path
+requires `v` to be NaN-free; if a populated `SearchProperties(v)` is attached
+to `Auto`, the cached `has_nan` flag is consulted, otherwise no-NaN is assumed
+(the same trust contract `Base.searchsortedlast` uses for sortedness of `v`).
 
-The "skewed" check guards the same `InterpolationSearch` branch from the
-opposite direction: if the queries are clustered into one region of their
-span (median query more than 20% off the midpoint of the query span),
-`Auto` picks `ExpFromLeft` even on linear `v`, because consecutive queries
-land in the same neighbourhood and the previous-result hint is worth more
-than the linear-extrapolation guess. Skew detection is gated on `m ≥ 10` —
-for smaller `m` the median sampling variance overwhelms the signal.
+The "linearity probe accepts" check is tiered:
+
+  - For `_AUTO_INTERP_MIN_GAP ≤ gap < _AUTO_INTERP_LOOSE_GAP` (8 to 256):
+    strict 0.1% sampled tolerance — only truly uniform data passes.
+  - For `gap ≥ _AUTO_INTERP_LOOSE_GAP` (≥ 256): loose 5% tolerance — at
+    these gap sizes, `InterpolationSearch`'s cache benefit compensates for
+    a worse guess, and the bounded-binary-search refinement is still
+    O(log n). This unlocks `InterpolationSearch` on approximately linear
+    data like sorted random or mildly jittered vectors at large `n`.
+
+The "skewed" check guards `InterpolationSearch` from the opposite direction:
+if the queries are clustered into one region of their span (median query
+more than 20% off the midpoint of the query span), `Auto` falls through to
+`BracketGallop` / `ExpFromLeft`, because consecutive queries land in the
+same neighbourhood and the previous-result hint is worth more than the
+linear-extrapolation guess. Skew detection is gated on `m ≥ 10` — for
+smaller `m` the median sampling variance overwhelms the signal.
+
+The `BracketGallop` fallback at `gap ≥ _AUTO_GALLOP_GAP_MIN` (= 16) exists
+because, at large gaps, `ExpFromLeft`'s five up-front linear probes are
+guaranteed to miss — the answer is much more than 5 elements past the
+previous-result hint. `BracketGallop` skips that wasted preamble and starts
+doubling from one position past `hint`.
 
 ## Crossover constants
 
@@ -63,11 +81,15 @@ reproduced here so they are easy to find from the docs:
 | Constant | Value | What it gates |
 |---|---|---|
 | `_AUTO_LINEAR_THRESHOLD` | 16 | Per-query `LinearScan` vs `BracketGallop` crossover on hinted calls. |
-| `_AUTO_BATCH_LINEAR_GAP` | 4 | Batched `LinearScan` vs `ExpFromLeft` crossover. |
+| `_AUTO_BATCH_LINEAR_GAP` | 4 | Batched `LinearScan` ceiling. |
+| `_AUTO_SIMD_GAP_MAX` (Int64 / Float64) | 64 / 64 | Maximum gap for `SIMDLinearScan` on dense Int64 / Float64. |
+| `_AUTO_GALLOP_GAP_MIN` | 16 | Above this gap, prefer `BracketGallop` over `ExpFromLeft` when `InterpolationSearch` isn't picked. |
 | `_AUTO_INTERP_MIN_GAP` | 8 | Minimum gap below which `InterpolationSearch` is never picked. |
 | `_AUTO_INTERP_MIN_N` | 1024 | Minimum `length(v)` below which `InterpolationSearch` is never picked. |
 | `_AUTO_INTERP_MIN_M` | 2 | Minimum `length(queries)`; single-query batches skip the heuristic entirely. |
-| `_AUTO_LINEAR_REL_TOLERANCE` | 1.0e-3 | Tolerance of the sampled-linearity probe. |
+| `_AUTO_INTERP_LOOSE_GAP` | 256 | At this gap, the linearity probe switches to the loose tolerance. |
+| `_AUTO_LINEAR_REL_TOLERANCE` | 1.0e-3 | Strict-tier tolerance of the sampled-linearity probe. |
+| `_AUTO_LINEAR_LOOSE_TOLERANCE` | 5.0e-2 | Loose-tier tolerance, used for `gap ≥ _AUTO_INTERP_LOOSE_GAP`. |
 
 These are not user-tunable from outside — they shipped with the version of
 the package documented here. Tightening or loosening them requires a PR
@@ -102,9 +124,18 @@ current answer than the linear-extrapolation guess from the endpoints.
 
 ## Reproducing the benchmarks
 
-Save this script as `bench/auto_sweep.jl` and run it with
-`julia --project=bench`. It evaluates every shipped strategy against
-every regime cell and reports `Auto`'s pick alongside the per-cell winner.
+The full sweep lives at [`bench/auto_sweep.jl`](https://github.com/SciML/FindFirstFunctions.jl/blob/main/bench/auto_sweep.jl)
+with the regime grid pre-configured. Run with
+`julia --project=bench bench/auto_sweep.jl`. It evaluates every shipped
+strategy against every regime cell, computes the per-cell winner, and
+reports `Auto`'s slack distribution against that optimum. An analysis
+helper at [`bench/analyze.jl`](https://github.com/SciML/FindFirstFunctions.jl/blob/main/bench/analyze.jl)
+reads the resulting `bench/results.csv` and prints per-strategy
+win-by-regime tables.
+
+The inline script below is the minimum-viable version of the same sweep —
+copy into a file and execute if you want to validate the numbers without
+cloning the repository.
 
 ```julia
 using BenchmarkTools, FindFirstFunctions, Random, Statistics
@@ -198,18 +229,30 @@ run_sweep()
 
 ### Headline results
 
-Across 800+ cells of the grid above, `Auto`'s wall-clock latency is:
+The 2.0 sweep covers 1080 cells across 5 `v` patterns × 4 query patterns ×
+5 `n` sizes × 6 `m` sizes × 2 element types (`Int64`, `Float64`), measured
+on AVX2 hardware.
 
-  - within 1× of optimal in roughly half of cells (it picks the winner),
-  - within 1.2× of optimal in 90% of cells,
-  - within 1.5× of optimal at the p99 of cells.
+| Metric | `Auto()` | `Auto(SearchProperties(v))` |
+|---|---|---|
+| median slack | 1.04× | 1.03× |
+| mean slack | 1.09× | 1.08× |
+| p90 slack | 1.33× | 1.31× |
+| p95 slack | 1.38× | 1.38× |
+| max slack | 2.18× | 2.09× |
 
-The cells where `Auto` slack is highest are the boundary cells around
-`gap ≈ 8` on borderline-linear data (jittered uniform), where the
-linearity probe occasionally accepts and `InterpolationSearch` is picked
-over a slightly-faster `ExpFromLeft`. The penalty is bounded — both
-strategies are O(log n) worst case — and the boundary case is statistically
-rare.
+Per-cell winner distribution across the sweep:
+
+  - LinearScan: 47% of cells (small-gap regime, all eltypes)
+  - SIMDLinearScan: 25% of cells (medium-gap regime, Int64/Float64 dense)
+  - InterpolationSearch: 13% of cells (large-gap regime, ~linear v)
+  - ExpFromLeft: 8% of cells (small-medium-gap regime, non-SIMD eltypes)
+  - BracketGallop: 8% of cells (large-gap regime, non-linear v)
+
+The cells where `Auto` slack is highest are boundary cells at `m = 4` where
+the per-cell winner is a measurement artefact (each measurement amortises
+over only 4 queries, so per-call setup noise dominates). The bulk of the
+distribution sits well below 1.5×.
 
 ### Reading the comparison table
 
