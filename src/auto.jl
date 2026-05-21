@@ -118,6 +118,14 @@ end
 end
 @inline _auto_simd_eligible(::AbstractVector, ::SearchProperties) = false
 
+# Uniformity check used by Auto to short-circuit to `UniformStep`. Two
+# routes: the static type test catches `AbstractRange` (always uniform by
+# definition); the props check catches `Vector` callers who supplied
+# `SearchProperties(v; is_uniform = true)`.
+@inline _auto_is_uniform(::AbstractRange, ::SearchProperties) = true
+@inline _auto_is_uniform(::AbstractVector, p::SearchProperties) =
+    p.has_props && p.is_uniform
+
 # InterpolationSearch eligibility: two-tier linearity check. For
 # `_AUTO_INTERP_MIN_GAP ≤ gap < _AUTO_INTERP_LOOSE_GAP` we require strict
 # linearity (`_AUTO_LINEAR_REL_TOLERANCE`, default 0.1%) — InterpolationSearch
@@ -137,32 +145,51 @@ end
     return props.has_props ? props.is_linear : _sampled_looks_linear(v)
 end
 
-# Per-query Auto dispatch.
+# Per-query Auto dispatch. Checks `is_uniform` first so `AbstractRange`
+# inputs (always uniform) and `Vector`s with `SearchProperties(v;
+# is_uniform = true)` short-circuit to `UniformStep`'s closed-form path
+# without paying for `_auto_pick`'s hint validity check.
 function Base.searchsortedlast(
-        ::Auto, v::AbstractVector, x, hint::Integer;
+        s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    s = _auto_pick(v, hint)
-    return s isa BinaryBracket ?
-        searchsortedlast(s, v, x; order = order) :
-        searchsortedlast(s, v, x, hint; order = order)
+    if _auto_is_uniform(v, s.props)
+        return searchsortedlast(UniformStep(), v, x; order = order)
+    end
+    chosen = _auto_pick(v, hint)
+    return chosen isa BinaryBracket ?
+        searchsortedlast(chosen, v, x; order = order) :
+        searchsortedlast(chosen, v, x, hint; order = order)
 end
 
 function Base.searchsortedfirst(
-        ::Auto, v::AbstractVector, x, hint::Integer;
+        s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    s = _auto_pick(v, hint)
-    return s isa BinaryBracket ?
-        searchsortedfirst(s, v, x; order = order) :
-        searchsortedfirst(s, v, x, hint; order = order)
+    if _auto_is_uniform(v, s.props)
+        return searchsortedfirst(UniformStep(), v, x; order = order)
+    end
+    chosen = _auto_pick(v, hint)
+    return chosen isa BinaryBracket ?
+        searchsortedfirst(chosen, v, x; order = order) :
+        searchsortedfirst(chosen, v, x, hint; order = order)
 end
 
-Base.searchsortedlast(
-    ::Auto, v::AbstractVector, x;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = searchsortedlast(BinaryBracket(), v, x; order = order)
-Base.searchsortedfirst(
-    ::Auto, v::AbstractVector, x;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+function Base.searchsortedlast(
+        s::Auto, v::AbstractVector, x;
+        order::Base.Order.Ordering = Base.Order.Forward,
+    )
+    if _auto_is_uniform(v, s.props)
+        return searchsortedlast(UniformStep(), v, x; order = order)
+    end
+    return searchsortedlast(BinaryBracket(), v, x; order = order)
+end
+function Base.searchsortedfirst(
+        s::Auto, v::AbstractVector, x;
+        order::Base.Order.Ordering = Base.Order.Forward,
+    )
+    if _auto_is_uniform(v, s.props)
+        return searchsortedfirst(UniformStep(), v, x; order = order)
+    end
+    return searchsortedfirst(BinaryBracket(), v, x; order = order)
+end

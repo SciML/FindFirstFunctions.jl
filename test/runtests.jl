@@ -161,6 +161,111 @@ end
             end
         end
 
+        @safetestset "UniformStep + Auto on AbstractRange (issue #7)" begin
+            using FindFirstFunctions
+
+            ranges_forward = (
+                1:100,
+                Int64(1):Int64(100),
+                0:5:500,
+                0.0:0.1:10.0,
+                LinRange(0.0, 10.0, 101),
+                LinRange(-5.0, 5.0, 50),
+                Float32(0):Float32(0.5):Float32(20),
+            )
+            ranges_reverse = (
+                100:-1:1,
+                10.0:-0.1:0.0,
+                LinRange(10.0, 0.0, 101),
+                Float64(20):-Float64(0.5):Float64(0),
+            )
+
+            for r in ranges_forward
+                for x in (
+                        first(r) - 1, first(r),
+                        first(r) + (last(r) - first(r)) / 2,
+                        last(r), last(r) + 1, 0,
+                    )
+                    @test searchsortedlast(UniformStep(), r, x) ==
+                        searchsortedlast(r, x)
+                    @test searchsortedfirst(UniformStep(), r, x) ==
+                        searchsortedfirst(r, x)
+                    @test searchsortedlast(Auto(), r, x) == searchsortedlast(r, x)
+                    @test searchsortedfirst(Auto(), r, x) == searchsortedfirst(r, x)
+                    h = max(1, length(r) ÷ 2)
+                    @test searchsortedlast(UniformStep(), r, x, h) ==
+                        searchsortedlast(r, x)
+                    @test searchsortedfirst(UniformStep(), r, x, h) ==
+                        searchsortedfirst(r, x)
+                    @test searchsortedlast(Auto(), r, x, h) == searchsortedlast(r, x)
+                end
+            end
+
+            for r in ranges_reverse
+                order = Base.Order.Reverse
+                for x in (
+                        first(r) + 1, first(r),
+                        (first(r) + last(r)) / 2,
+                        last(r), last(r) - 1, 0,
+                    )
+                    @test searchsortedlast(UniformStep(), r, x; order = order) ==
+                        searchsortedlast(r, x, order)
+                    @test searchsortedfirst(UniformStep(), r, x; order = order) ==
+                        searchsortedfirst(r, x, order)
+                    @test searchsortedlast(Auto(), r, x; order = order) ==
+                        searchsortedlast(r, x, order)
+                    @test searchsortedfirst(Auto(), r, x; order = order) ==
+                        searchsortedfirst(r, x, order)
+                end
+            end
+
+            # Edge cases.
+            r_empty = 1:0
+            @test searchsortedlast(UniformStep(), r_empty, 5) == 0
+            @test searchsortedfirst(UniformStep(), r_empty, 5) == 1
+            @test searchsortedlast(Auto(), r_empty, 5) == 0
+            r_single = 42:42
+            @test searchsortedlast(UniformStep(), r_single, 41) == 0
+            @test searchsortedlast(UniformStep(), r_single, 42) == 1
+            @test searchsortedlast(UniformStep(), r_single, 43) == 1
+            @test searchsortedfirst(UniformStep(), r_single, 41) == 1
+            @test searchsortedfirst(UniformStep(), r_single, 42) == 1
+            @test searchsortedfirst(UniformStep(), r_single, 43) == 2
+
+            # Non-Range vector falls back to BinaryBracket.
+            v = collect(0.0:0.1:10.0)
+            for x in (-1.0, 0.0, 5.5, 10.0, 100.0)
+                @test searchsortedlast(UniformStep(), v, x) == searchsortedlast(v, x)
+                @test searchsortedfirst(UniformStep(), v, x) == searchsortedfirst(v, x)
+            end
+
+            # Auto on AbstractRange short-circuits to the closed-form path —
+            # the answer matches Base's range-aware overload and the call is
+            # near-zero overhead (a small kwarg trampoline shows up under
+            # `@allocated`, but no large heap traffic).
+            r_big = 0.0:0.001:100.0
+            @test searchsortedlast(Auto(), r_big, 50.5) == searchsortedlast(r_big, 50.5)
+            @test searchsortedfirst(Auto(), r_big, 50.5) ==
+                searchsortedfirst(r_big, 50.5)
+            # Warm up once, then verify allocation is tiny (kwarg trampoline only).
+            searchsortedlast(Auto(), r_big, 50.5)
+            @test @allocated(searchsortedlast(Auto(), r_big, 50.5)) < 64
+            @test @allocated(searchsortedfirst(Auto(), r_big, 50.5)) < 64
+
+            # Batched path on AbstractRange.
+            r = 0.0:0.5:100.0
+            queries = sort!([5.3, 17.2, 42.9, 80.1, 99.5])
+            out = Vector{Int}(undef, length(queries))
+            searchsortedlast!(out, r, queries; strategy = Auto())
+            @test out == searchsortedlast.(Ref(r), queries)
+            searchsortedfirst!(out, r, queries; strategy = Auto())
+            @test out == searchsortedfirst.(Ref(r), queries)
+            unsorted_queries = [42.0, 5.0, 80.0, 17.0]
+            out2 = Vector{Int}(undef, length(unsorted_queries))
+            searchsortedlast!(out2, r, unsorted_queries; strategy = Auto())
+            @test out2 == searchsortedlast.(Ref(r), unsorted_queries)
+        end
+
         @safetestset "Custom ordering for strategy dispatch" begin
             using FindFirstFunctions:
                 Guesser, GuesserHint, BracketGallop, LinearScan,
@@ -443,7 +548,7 @@ end
             # because InterpolationSearch's bad guess just makes BracketGallop
             # wider, never incorrect.
             v_log = exp.(range(0.0, 10.0; length = 4096))
-            lying = SearchProperties(true, true, false, false)
+            lying = SearchProperties(true, true, false, false, false)
             tt_log = sort!(rand(StableRNG(11), 8) .* (v_log[end] - v_log[1]) .+ v_log[1])
             out_lying = Vector{Int}(undef, length(tt_log))
             searchsortedlast!(out_lying, v_log, tt_log; strategy = Auto(lying))
@@ -471,6 +576,27 @@ end
             v_signed = collect(-100.0:0.001:65.0)
             p_signed = SearchProperties(v_signed)
             @test !p_signed.is_log_linear
+
+            # is_uniform: detected for any uniformly-spaced vector. The
+            # 9-point linearity probe at a tight 1e-12 tolerance flags
+            # exact uniformity (a few ulp of accumulated float roundoff).
+            # AbstractRange short-circuits to true with no probe.
+            @test SearchProperties(1:100).is_uniform                      # range
+            @test SearchProperties(0.0:0.1:10.0).is_uniform               # StepRangeLen
+            @test SearchProperties(LinRange(0.0, 10.0, 100)).is_uniform   # LinRange
+            @test SearchProperties(collect(1:100)).is_uniform             # uniform Vector
+            @test SearchProperties(collect(0.0:0.1:10.0)).is_uniform      # uniform Vector
+            # Non-uniform vectors are rejected.
+            v_log_collected = collect(exp.(range(0.0, log(1.0e6); length = 100)))
+            @test !SearchProperties(v_log_collected).is_uniform
+            v_random = sort!(rand(StableRNG(42), 100))
+            @test !SearchProperties(v_random).is_uniform
+            # Manual override: `is_uniform = false` forces rejection even
+            # if the probe would accept; `is_uniform = true` accepts even
+            # if the probe would reject.
+            v_uniform_collected = collect(0.0:0.5:50.0)
+            @test !SearchProperties(v_uniform_collected; is_uniform = false).is_uniform
+            @test SearchProperties(v_log_collected; is_uniform = true).is_uniform
         end
 
         @safetestset "Batched in-place searchsorted!" begin
