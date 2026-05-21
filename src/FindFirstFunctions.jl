@@ -10,6 +10,7 @@ module FindFirstFunctions
 export
     SearchStrategy,
     LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
+    LinearBinarySearch,
     InterpolationSearch, BitInterpolationSearch,
     BinaryBracket, UniformStep, BisectThenSIMD,
     GuesserHint, Auto,

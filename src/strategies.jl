@@ -23,6 +23,10 @@ called with a strategy as the first positional argument:
   - [`ExpFromLeft`](@ref) expands rightward from a left-bound hint by
     doubling, then binary-searches inside the final bracket. Best for batched
     sorted queries where each next query's hint is the previous result.
+  - [`LinearBinarySearch`](@ref) walks linearly from the hint for up to `MAX`
+    steps then falls back to a binary search. Wins at small constant gaps
+    where the exponential-doubling overhead of `ExpFromLeft` /
+    `BracketGallop` is pure cost.
   - [`InterpolationSearch`](@ref) guesses the answer by linearly extrapolating
     between `v[lo]` and `v[hi]`, then refines with a bounded binary search.
     O(1) per query on uniformly-spaced data; falls back to O(log n) on
@@ -103,6 +107,80 @@ then binary-search inside the bracket.
 Falls back to [`BinaryBracket`](@ref) when no hint is supplied.
 """
 struct ExpFromLeft <: SearchStrategy end
+
+"""
+    LinearBinarySearch{MAX}() <: SearchStrategy
+    LinearBinarySearch()                       # default MAX = 8
+    LinearBinarySearch(linear_window::Integer) # curated MAX from {0, 1, 2, 4, 8, 16, 32, 64, 128}
+
+Bounded linear walk from the hint, falling back to [`BinaryBracket`](@ref)
+when the answer isn't found within `MAX` steps. Designed for workloads where
+consecutive queries are *probably* within a small constant gap of the
+previous result — the linear walk's tight per-step cost beats the exponential
+doubling overhead of [`ExpFromLeft`](@ref) / [`BracketGallop`](@ref) at small
+gaps, while the binary fallback caps the worst case at `O(log n)` after the
+`MAX` linear probes.
+
+Per-call cost decomposes as:
+
+  - `O(min(gap, MAX))` scalar comparisons when the answer is within `MAX` of
+    the hint (the common case for monotone-forward ODE-style sweeps),
+  - `MAX` scalar comparisons plus one full `searchsortedlast` /
+    `searchsortedfirst` binary search when the answer is farther away.
+
+`MAX` is a *type parameter*, not a runtime field — the walk count is
+statically known and the unrolled loop body is fully inlined. Allowed values
+are `0, 1, 2, 4, 8, 16, 32, 64, 128`; arbitrary integers would cause a
+specialization explosion, so the factory constructor restricts to a curated
+set. Construct as `LinearBinarySearch()` for the default (`MAX = 8`),
+`LinearBinarySearch(k)` for a specific `k`, or `LinearBinarySearch{k}()` for
+the parametric form directly.
+
+Comparison with neighbour strategies:
+
+  - vs [`LinearScan`](@ref): same walk semantics from the hint, but bounded
+    by `MAX` with a binary fallback rather than walking all the way to the
+    boundary. Strictly better when the hint may occasionally be far off; the
+    `MAX = 0` form degenerates to a single hint-position check.
+  - vs [`ExpFromLeft`](@ref): no doubling overhead. ExpFromLeft does ≥ 5
+    initial linear probes plus exponential expansion; at very small gaps
+    (≤ 4) those expansion checks are pure overhead, and at moderate gaps
+    (≤ MAX) the linear walk wins on cache locality.
+  - vs [`BracketGallop`](@ref): walks linearly rather than bidirectionally
+    doubling. Wins when the hint is reliably *behind* the answer; loses
+    when the hint is past the answer and `MAX` is small (a backward walk
+    of `MAX` steps may not be enough; bracket gallop's exponential expansion
+    handles backward-far hints natively).
+
+Falls back to [`BinaryBracket`](@ref) when no hint is supplied (the linear
+walk has no anchor) and when `hint` is outside `axes(v)`.
+"""
+struct LinearBinarySearch{MAX} <: SearchStrategy end
+LinearBinarySearch() = LinearBinarySearch{8}()
+
+# Curated MAX values — arbitrary integers would cause per-MAX method
+# specialization explosion across the dispatch table. The set covers the
+# practical sweet spot for ODE-style monotone-forward workloads (small MAX)
+# through to wide-jitter or very-large-n workloads (large MAX). 0 is a valid
+# choice — it means "check the hint position and immediately fall through
+# to binary search if it's not the answer", useful for callers who want
+# explicit no-walk semantics.
+function LinearBinarySearch(linear_window::Integer)
+    linear_window == 0 && return LinearBinarySearch{0}()
+    linear_window == 1 && return LinearBinarySearch{1}()
+    linear_window == 2 && return LinearBinarySearch{2}()
+    linear_window == 4 && return LinearBinarySearch{4}()
+    linear_window == 8 && return LinearBinarySearch{8}()
+    linear_window == 16 && return LinearBinarySearch{16}()
+    linear_window == 32 && return LinearBinarySearch{32}()
+    linear_window == 64 && return LinearBinarySearch{64}()
+    linear_window == 128 && return LinearBinarySearch{128}()
+    throw(
+        ArgumentError(
+            "`linear_window` must be one of (0, 1, 2, 4, 8, 16, 32, 64, 128), got $linear_window",
+        ),
+    )
+end
 
 """
     InterpolationSearch <: SearchStrategy

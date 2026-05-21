@@ -27,6 +27,7 @@ using PrecompileTools: @compile_workload, @setup_workload
         # Strategy dispatch — single-query forms across the standard strategies.
         for strategy in (
                 LinearScan(), SIMDLinearScan(), BracketGallop(), ExpFromLeft(),
+                LinearBinarySearch(), LinearBinarySearch(4),
                 InterpolationSearch(), BinaryBracket(), Auto(),
                 Auto(SearchProperties(linear_vec)),
             )

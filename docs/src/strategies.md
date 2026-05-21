@@ -21,6 +21,7 @@ callers who already know their access pattern and want to pin a strategy.
 | [`SIMDLinearScan`](@ref FindFirstFunctions.SIMDLinearScan) | `DenseVector{Int64}` or `DenseVector{Float64}`, forward walk past the hint | O(1) | O(n/8) | yes |
 | [`BracketGallop`](@ref FindFirstFunctions.BracketGallop) | answer may be either side of the hint, distance unknown | O(1) | ~2 log₂ n | yes |
 | [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft) | sorted batch — hint is `prev_result`, answer is monotonically ≥ hint | O(1) | O(log n) | yes (as lower bound) |
+| [`LinearBinarySearch`](@ref FindFirstFunctions.LinearBinarySearch) | gap from hint is reliably ≤ `MAX` (≈ 1–8) — opt-in, `Auto` does not pick | O(1) | O(log n) | yes |
 | [`InterpolationSearch`](@ref FindFirstFunctions.InterpolationSearch) | `v` is uniformly spaced and numeric | O(1) | O(log n) | no |
 | [`BitInterpolationSearch`](@ref FindFirstFunctions.BitInterpolationSearch) | `DenseVector{Float64}` and log-spaced (geometric) — opt-in, `Auto` does not pick | O(1) | O(log n) | no |
 | [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket) | no hint available, or fallback | O(log n) | O(log n) | no |
@@ -39,6 +40,7 @@ FindFirstFunctions.LinearScan
 FindFirstFunctions.SIMDLinearScan
 FindFirstFunctions.BracketGallop
 FindFirstFunctions.ExpFromLeft
+FindFirstFunctions.LinearBinarySearch
 FindFirstFunctions.InterpolationSearch
 FindFirstFunctions.BitInterpolationSearch
 FindFirstFunctions.BinaryBracket
@@ -126,6 +128,63 @@ Caveats:
     [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft). Pin it
     explicitly when you have a workload that wants a long linear forward
     scan and you know the element type.
+
+### LinearBinarySearch
+
+Bounded linear walk from the hint with a binary-search fallback. The
+type parameter `MAX` caps the walk at `MAX` advance steps; if the answer
+isn't bracketed within the window, the strategy falls back to a binary
+search on the remaining range.
+
+The intended workload is *probably-correlated* queries — ODE timestep
+sweeps, sorted-batch hint-as-previous-result patterns, streaming
+evaluation — where consecutive answers usually sit a small constant
+number of indices apart, but the occasional larger jump can't be ruled
+out. Compared to:
+
+  - [`LinearScan`](@ref FindFirstFunctions.LinearScan): the walk stops
+    after `MAX` steps and falls back to binary search rather than walking
+    all the way to the array boundary. Strictly preferable when the hint
+    *might* occasionally be far off.
+  - [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft): no exponential
+    doubling overhead. ExpFromLeft does ≥ 5 initial linear probes plus
+    an expanding bracket; at very small gaps (≤ 2) those expansion checks
+    are pure cost and `LinearBinarySearch{4}` wins by ~1 ns/q on the
+    per-call bench.
+  - [`BracketGallop`](@ref FindFirstFunctions.BracketGallop): same
+    story — bidirectional doubling carries setup cost that the
+    tight linear walk skips.
+
+Allowed `MAX` values are `0, 1, 2, 4, 8, 16, 32, 64, 128`. Restricting
+to a curated set prevents the per-`MAX` method-specialization
+explosion that would otherwise happen as callers pass arbitrary
+integers. The factory constructor `LinearBinarySearch(k)` validates `k`
+against this set; for direct parametric construction use
+`LinearBinarySearch{k}()`. For `MAX ≤ 16` the walk is fully unrolled
+via `@generated`; for larger `MAX` the walk is a bounded while-loop
+(unrolling at MAX = 128 would balloon the code size).
+
+**Opt-in only.** `Auto` does not pick `LinearBinarySearch`. The bench
+sweep at `bench/linearbinary_sweep.jl` shows the win regime is narrow:
+
+  - At gap = 1 on `n = 100k`, `LinearBinarySearch{4}` is ~9.5 ns/q vs
+    LinearScan's 10 ns vs ExpFromLeft's 12 ns vs BracketGallop's 17 ns
+    — a ~1 ns/q win that the per-call `Auto` heuristic can't recoup
+    with a runtime branch.
+  - At gap = 2, `LinearBinarySearch{4}` ties `LinearScan` (~11 ns/q).
+  - For gap > `MAX`, the binary fallback triggers and the strategy
+    pays the worst-case `O(log n)` cost on top of the `MAX` failed
+    linear probes — slightly worse than `BracketGallop` at large gaps.
+
+Pin `LinearBinarySearch` explicitly when:
+
+  - You know consecutive queries are reliably within a small constant
+    of the previous answer (monotone-forward ODE sweeps, time-series
+    streaming).
+  - You want a hard upper bound on the linear-walk length
+    (`LinearScan` has no upper bound until it walks off the array).
+  - The default `MAX = 8` matches your workload's typical gap; tune
+    via `LinearBinarySearch(k)` if you've measured a different gap.
 
 ### BitInterpolationSearch
 
