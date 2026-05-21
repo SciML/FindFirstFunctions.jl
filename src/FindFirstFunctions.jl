@@ -1,5 +1,7 @@
 module FindFirstFunctions
 
+using SIMD: SIMD
+
 # Public API surface for `using FindFirstFunctions`. The strategy types are
 # zero-field singletons (except `GuesserHint` and `Auto`, which carry small
 # isbits payloads), so exporting them only adds names to the caller's
@@ -11,7 +13,7 @@ export
     SearchStrategy,
     LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
     InterpolationSearch, BitInterpolationSearch,
-    BinaryBracket, BisectThenSIMD,
+    BinaryBracket, SIMDBinarySearch, BisectThenSIMD,
     GuesserHint, Auto,
     SearchProperties,
     Guesser, looks_linear,
@@ -30,6 +32,7 @@ include("equality.jl")            # findfirstequal + findfirstsortedequal
 include("strategies.jl")          # SearchStrategy + concrete strategy types + SearchProperties + Auto
 include("search_properties.jl")   # Linearity / NaN probes + populated SearchProperties constructor
 include("dispatch.jl")            # Per-strategy searchsortedfirst/last methods + their internal helpers
+include("simd_binary_search.jl")  # SIMDBinarySearch (8-way SIMD-gather binary search)
 include("auto.jl")                # Auto crossover constants + per-query Auto + Auto's batched helpers
 include("batched.jl")             # Batched API + searchsortedrange + _batched! (incl Auto specialization)
 include("guesser.jl")             # looks_linear + Guesser + GuesserHint dispatch

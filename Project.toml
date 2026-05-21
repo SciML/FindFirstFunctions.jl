@@ -5,10 +5,12 @@ authors = ["Chris Elrod <elrodc@gmail.com> and contributors"]
 
 [deps]
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+SIMD = "fdea26ae-647d-5447-a871-4b548cad5224"
 
 [compat]
 Pkg = "1.10"
 PrecompileTools = "1"
+SIMD = "3"
 SafeTestsets = "0.1"
 StableRNGs = "1"
 Test = "1.10"
