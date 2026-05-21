@@ -1,25 +1,5 @@
 # FindFirstFunctions.jl NEWS
 
-## Unreleased
-
-### New strategy: `UniformStep` (closes #7)
-
-O(1) direct-arithmetic lookup for uniformly-spaced vectors. The answer
-index is computed from `(x - first(v)) / step(v)` rather than via binary
-search or galloping — independent of `length(v)`. Specialized for
-`AbstractRange{<:Real}`; falls back to `BinaryBracket` for non-range
-vectors and for custom orderings (`By`, `Lt`, …).
-
-`Auto` now short-circuits `AbstractRange` inputs to `UniformStep` in both
-per-query and batched paths, skipping the gap-estimate and
-linearity-probe overhead. Measured:
-`searchsortedlast(Auto(), 0.0:0.001:100.0, x)` now matches
-`Base.searchsortedlast(r, x)` at ~26 ns (vs ~80 ns through the
-un-specialized Auto path on a Vector of the same data).
-
-The strategy can also be pinned explicitly:
-`searchsortedlast(UniformStep(), r, x)`.
-
 ## 2.0.0
 
 This is a major rewrite of the sorted-search API. The 1.x surface — a
