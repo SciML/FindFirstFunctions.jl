@@ -17,7 +17,6 @@ end
 end
 
 @testset "JET static analysis" begin
-    # Test key entry points for type stability and potential runtime errors
     vec_int64 = Int64[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     vec_float64 = Float64[1.0, 2.0, 3.0, 4.0, 5.0]
 
@@ -45,68 +44,63 @@ end
     rep = JET.report_call(guesser, (Float64,))
     @test length(JET.get_reports(rep)) == 0
 
-    # Strategy-dispatched searchsortedfirst with Integer hint
-    rep = JET.report_call(
-        Base.searchsortedfirst,
-        (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
-    )
-    @test length(JET.get_reports(rep)) == 0
+    # search_last with each StrategyKind - the v3 enum-dispatch hot path.
+    for kind in (
+            KIND_BINARY_BRACKET, KIND_LINEAR_SCAN, KIND_BRACKET_GALLOP,
+            KIND_EXP_FROM_LEFT, KIND_INTERPOLATION_SEARCH,
+        )
+        rep = JET.report_call(
+            (k, v, x, h) -> FindFirstFunctions.search_last(k, v, x, h),
+            (typeof(kind), Vector{Int64}, Int64, Int64),
+        )
+        @test length(JET.get_reports(rep)) == 0
+    end
 
-    # Strategy-dispatched searchsortedlast with Integer hint
-    rep = JET.report_call(
-        Base.searchsortedlast,
-        (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
-    )
-    @test length(JET.get_reports(rep)) == 0
+    # search_first with each StrategyKind
+    for kind in (
+            KIND_BINARY_BRACKET, KIND_LINEAR_SCAN, KIND_BRACKET_GALLOP,
+            KIND_EXP_FROM_LEFT, KIND_INTERPOLATION_SEARCH,
+        )
+        rep = JET.report_call(
+            (k, v, x, h) -> FindFirstFunctions.search_first(k, v, x, h),
+            (typeof(kind), Vector{Int64}, Int64, Int64),
+        )
+        @test length(JET.get_reports(rep)) == 0
+    end
 
-    # searchsortedfirstexp - exponential search
+    # searchsortedfirstexp - exponential search helper (internal)
     rep = JET.report_call(
         FindFirstFunctions.searchsortedfirstexp,
         (Vector{Int64}, Int64, Int64, Int64)
     )
     @test length(JET.get_reports(rep)) == 0
 
-    # searchsortedfirst! - batched in-place search
-    rep = JET.report_call(
-        FindFirstFunctions.searchsortedfirst!,
-        (Vector{Int64}, Vector{Int64}, Vector{Int64})
-    )
-    @test length(JET.get_reports(rep)) == 0
-
-    # searchsortedlast! - batched in-place search
+    # Batched API
     rep = JET.report_call(
         FindFirstFunctions.searchsortedlast!,
-        (Vector{Int64}, Vector{Int64}, Vector{Int64})
+        (Vector{Int}, Vector{Int64}, Vector{Int64}),
     )
     @test length(JET.get_reports(rep)) == 0
 end
 
 @testset "AllocCheck - Static Allocation Analysis" begin
-    # Use AllocCheck's static analysis (check_allocs) instead of runtime @allocated.
-    # This is more robust as it analyzes LLVM IR for allocation sites rather than
-    # measuring runtime allocations which can be noisy due to GC artifacts.
-
     @testset "findfirstequal" begin
-        # Int64 vector (SIMD path)
         allocs = check_allocs(FindFirstFunctions.findfirstequal, (Int64, Vector{Int64}))
         @test isempty(allocs)
     end
 
     @testset "findfirstsortedequal" begin
-        # Int64 vector (binary search + SIMD)
         allocs = check_allocs(FindFirstFunctions.findfirstsortedequal, (Int64, Vector{Int64}))
         @test isempty(allocs)
     end
 
     @testset "bracketstrictlymonotonic" begin
-        # Int64 vector with Forward ordering
         allocs = check_allocs(
             FindFirstFunctions.bracketstrictlymonotonic,
             (Vector{Int64}, Int64, Int64, Base.Order.ForwardOrdering)
         )
         @test isempty(allocs)
 
-        # Float64 vector with Forward ordering
         allocs = check_allocs(
             FindFirstFunctions.bracketstrictlymonotonic,
             (Vector{Float64}, Float64, Int64, Base.Order.ForwardOrdering)
@@ -115,18 +109,14 @@ end
     end
 
     @testset "looks_linear" begin
-        # Float64 vector
         allocs = check_allocs(FindFirstFunctions.looks_linear, (Vector{Float64},))
         @test isempty(allocs)
 
-        # Int64 vector
         allocs = check_allocs(FindFirstFunctions.looks_linear, (Vector{Int64},))
         @test isempty(allocs)
     end
 
     @testset "Guesser callable" begin
-        # Test the Guesser callable with Float64 input
-        # Note: We test a concrete Guesser type, not the constructor
         GuesserType = FindFirstFunctions.Guesser{Vector{Float64}}
         allocs = check_allocs(
             (g, x) -> g(x),
@@ -135,47 +125,32 @@ end
         @test isempty(allocs)
     end
 
-    @testset "searchsortedfirst with strategy + hint" begin
-        # Int64 vector with integer hint
-        allocs = check_allocs(
-            Base.searchsortedfirst,
-            (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
-        )
-        @test isempty(allocs)
-
-        # Float64 vector with integer hint
-        allocs = check_allocs(
-            Base.searchsortedfirst,
-            (FindFirstFunctions.BracketGallop, Vector{Float64}, Float64, Int64)
-        )
-        @test isempty(allocs)
-    end
-
-    @testset "searchsortedlast with strategy + hint" begin
-        # Int64 vector with integer hint
-        allocs = check_allocs(
-            Base.searchsortedlast,
-            (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
-        )
-        @test isempty(allocs)
-
-        # Float64 vector with integer hint
-        allocs = check_allocs(
-            Base.searchsortedlast,
-            (FindFirstFunctions.BracketGallop, Vector{Float64}, Float64, Int64)
-        )
-        @test isempty(allocs)
+    @testset "search_last via enum tag" begin
+        # Each kind on Int64 / Float64 dense vectors: no allocations.
+        for kind in (
+                KIND_BINARY_BRACKET, KIND_LINEAR_SCAN,
+                KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
+            )
+            allocs = check_allocs(
+                (k, v, x, h) -> FindFirstFunctions.search_last(k, v, x, h),
+                (typeof(kind), Vector{Int64}, Int64, Int64),
+            )
+            @test isempty(allocs)
+            allocs = check_allocs(
+                (k, v, x, h) -> FindFirstFunctions.search_first(k, v, x, h),
+                (typeof(kind), Vector{Int64}, Int64, Int64),
+            )
+            @test isempty(allocs)
+        end
     end
 
     @testset "searchsortedfirstexp" begin
-        # Int64 vector
         allocs = check_allocs(
             FindFirstFunctions.searchsortedfirstexp,
             (Vector{Int64}, Int64, Int64, Int64)
         )
         @test isempty(allocs)
 
-        # Float64 vector
         allocs = check_allocs(
             FindFirstFunctions.searchsortedfirstexp,
             (Vector{Float64}, Float64, Int64, Int64)

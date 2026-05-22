@@ -968,6 +968,188 @@ end
                     searchsortedlast(v, Int64(50))
             end
         end
+
+        @safetestset "Enum-tagged dispatch (v3 API)" begin
+            using FindFirstFunctions
+            using FindFirstFunctions: search_last, search_first, strategy_kind
+            using StableRNGs
+
+            # Mapping from struct → kind, and kind enum value coverage.
+            @testset "strategy_kind coverage" begin
+                @test strategy_kind(BinaryBracket()) === KIND_BINARY_BRACKET
+                @test strategy_kind(LinearScan()) === KIND_LINEAR_SCAN
+                @test strategy_kind(SIMDLinearScan()) === KIND_SIMD_LINEAR_SCAN
+                @test strategy_kind(BracketGallop()) === KIND_BRACKET_GALLOP
+                @test strategy_kind(ExpFromLeft()) === KIND_EXP_FROM_LEFT
+                @test strategy_kind(InterpolationSearch()) === KIND_INTERPOLATION_SEARCH
+                @test strategy_kind(BitInterpolationSearch()) === KIND_BIT_INTERPOLATION_SEARCH
+                @test strategy_kind(UniformStep()) === KIND_UNIFORM_STEP
+                @test strategy_kind(BisectThenSIMD()) === KIND_BISECT_THEN_SIMD
+            end
+
+            @testset "Per-kind search_last parity vs Base" begin
+                # Each hint-using kind should match Base when given a valid
+                # in-range hint. Hint-ignoring kinds (BinaryBracket,
+                # InterpolationSearch, UniformStep, BisectThenSIMD) match
+                # Base regardless of hint.
+                v = collect(1:100)
+                for x in (-1, 0, 1, 17, 50, 99, 100, 101, 200), h in (1, 30, 60, 90, 100)
+                    want_last = searchsortedlast(v, x)
+                    want_first = searchsortedfirst(v, x)
+                    for kind in (
+                            KIND_BINARY_BRACKET, KIND_LINEAR_SCAN,
+                            KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
+                            KIND_INTERPOLATION_SEARCH,
+                        )
+                        @test search_last(kind, v, x, h) == want_last
+                        @test search_first(kind, v, x, h) == want_first
+                    end
+                    # No-hint forms.
+                    @test search_last(KIND_BINARY_BRACKET, v, x) == want_last
+                    @test search_first(KIND_BINARY_BRACKET, v, x) == want_first
+                    @test search_last(KIND_INTERPOLATION_SEARCH, v, x) == want_last
+                    @test search_first(KIND_INTERPOLATION_SEARCH, v, x) == want_first
+                end
+            end
+
+            @testset "Per-kind Float64 parity (incl. SIMD)" begin
+                rng = StableRNG(7001)
+                v = sort!(randn(rng, 256))
+                for _ in 1:200
+                    x = (rand(rng) - 0.5) * 6
+                    h = rand(rng, 1:length(v))
+                    want_last = searchsortedlast(v, x)
+                    want_first = searchsortedfirst(v, x)
+                    for kind in (
+                            KIND_BINARY_BRACKET, KIND_LINEAR_SCAN,
+                            KIND_SIMD_LINEAR_SCAN, KIND_BRACKET_GALLOP,
+                            KIND_EXP_FROM_LEFT, KIND_INTERPOLATION_SEARCH,
+                        )
+                        @test search_last(kind, v, x, h) == want_last
+                        @test search_first(kind, v, x, h) == want_first
+                    end
+                end
+            end
+
+            @testset "Per-kind Int64 SIMD parity" begin
+                rng = StableRNG(7002)
+                v = sort!(rand(rng, Int64(-200):Int64(200), 256))
+                for _ in 1:200
+                    x = rand(rng, Int64(-220):Int64(220))
+                    h = rand(rng, 1:length(v))
+                    want_last = searchsortedlast(v, x)
+                    want_first = searchsortedfirst(v, x)
+                    @test search_last(KIND_SIMD_LINEAR_SCAN, v, x, h) == want_last
+                    @test search_first(KIND_SIMD_LINEAR_SCAN, v, x, h) == want_first
+                end
+            end
+
+            @testset "UniformStep kind on AbstractRange" begin
+                for r in (1:100, 0.0:0.1:10.0, LinRange(0.0, 10.0, 101))
+                    for x in (first(r) - 1, first(r), last(r), last(r) + 1)
+                        @test search_last(KIND_UNIFORM_STEP, r, x) ==
+                            searchsortedlast(r, x)
+                        @test search_first(KIND_UNIFORM_STEP, r, x) ==
+                            searchsortedfirst(r, x)
+                    end
+                end
+            end
+
+            @testset "BitInterpolationSearch kind on positive Float64" begin
+                v = exp.(range(0.0, log(1.0e6); length = 1024))
+                rng = StableRNG(7003)
+                for _ in 1:100
+                    x = exp(rand(rng) * log(1.0e6))
+                    @test search_last(KIND_BIT_INTERPOLATION_SEARCH, v, x) ==
+                        searchsortedlast(v, x)
+                    @test search_first(KIND_BIT_INTERPOLATION_SEARCH, v, x) ==
+                        searchsortedfirst(v, x)
+                end
+            end
+
+            @testset "Reverse order under enum dispatch" begin
+                v = collect(10.0:-1.0:1.0)
+                for kind in (
+                        KIND_BINARY_BRACKET, KIND_LINEAR_SCAN,
+                        KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
+                        KIND_INTERPOLATION_SEARCH,
+                    )
+                    for x in (0.5, 1.0, 5.0, 10.0, 11.0), h in (1, 5, 10)
+                        @test search_last(kind, v, x, h; order = Base.Order.Reverse) ==
+                            searchsortedlast(v, x, Base.Order.Reverse)
+                        @test search_first(kind, v, x, h; order = Base.Order.Reverse) ==
+                            searchsortedfirst(v, x, Base.Order.Reverse)
+                    end
+                end
+            end
+
+            @testset "Auto inferred return type" begin
+                # Auto(v) was previously Union-returning in the v2 design
+                # — the `_auto_pick` branch returned BinaryBracket vs
+                # BracketGallop depending on length, and each branch had
+                # different return types feeding the per-query dispatch.
+                # In v3 the kind is stored as a UInt8-backed enum, so
+                # both branches return Int.
+                v = collect(1:100)
+                a = Auto(v)
+                @test isbits(a)
+                @test @inferred(Auto(v)) isa Auto
+                @test @inferred(Auto(SearchProperties(v))) isa Auto
+                # `search_last(::Auto, ...)` is concretely Int-returning.
+                @test @inferred(search_last(a, v, 50, 1)) === 50
+                @test @inferred(search_first(a, v, 50, 1)) === 50
+                @test @inferred(search_last(a, v, 50)) === 50
+            end
+
+            @testset "Vector{Auto} has concrete eltype" begin
+                # Mixed-underlying-kind Vector{Auto}: even when each Auto
+                # was constructed from a different v / props, the
+                # element type is `Auto` (concrete), not
+                # `Union{Auto{...}, Auto{...}}` or `Any`.
+                a1 = Auto(collect(1:100))          # KIND_UNIFORM_STEP
+                a2 = Auto(rand(StableRNG(10), 100))  # KIND_BRACKET_GALLOP (not uniform)
+                a3 = Auto(collect(1:8))            # KIND_LINEAR_SCAN
+                v = Auto[a1, a2, a3]
+                @test eltype(v) === Auto
+                @test isconcretetype(eltype(v))
+            end
+
+            @testset "Enum dispatch round-trips through Base shim" begin
+                # The legacy `Base.searchsortedlast(::S, v, x[, hint])`
+                # path goes through `search_last(KIND_X, ...)`. Verify
+                # both produce identical answers (shim correctness).
+                v = collect(1:1000)
+                rng = StableRNG(7004)
+                pairs = (
+                    (BracketGallop(), KIND_BRACKET_GALLOP),
+                    (LinearScan(), KIND_LINEAR_SCAN),
+                    (ExpFromLeft(), KIND_EXP_FROM_LEFT),
+                    (InterpolationSearch(), KIND_INTERPOLATION_SEARCH),
+                    (BinaryBracket(), KIND_BINARY_BRACKET),
+                )
+                for (s, kind) in pairs
+                    for _ in 1:50
+                        x = rand(rng, 1:1000)
+                        h = rand(rng, 1:1000)
+                        @test searchsortedlast(s, v, x, h) ==
+                            search_last(kind, v, x, h)
+                        @test searchsortedfirst(s, v, x, h) ==
+                            search_first(kind, v, x, h)
+                    end
+                end
+            end
+
+            @testset "GuesserHint stays on multimethod path" begin
+                using FindFirstFunctions: Guesser, GuesserHint
+                v = collect(LinRange(0, 10, 100))
+                g = Guesser(v)
+                gh = GuesserHint(g)
+                @test search_last(gh, v, 4.0) == searchsortedlast(v, 4.0)
+                @test search_first(gh, v, 4.0) == searchsortedfirst(v, 4.0)
+                # strategy_kind on a GuesserHint must error — it has no tag.
+                @test_throws ArgumentError strategy_kind(gh)
+            end
+        end
     end
 
     if GROUP == "QA"

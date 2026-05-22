@@ -1,5 +1,123 @@
 # FindFirstFunctions.jl NEWS
 
+## 3.0.0
+
+The 2.x sorted-search API was a single generic
+`Base.searchsortedlast(::SearchStrategy, v, x[, hint])` /
+`Base.searchsortedfirst(::SearchStrategy, ...)` extended once per
+concrete strategy struct. That design made dispatch type-stable on the
+*chosen* strategy but produced `Union` returns whenever the strategy
+itself depended on runtime data — in particular `Auto`'s decision tree,
+where the strategy struct returned by `_auto_pick(v, hint)` had a
+runtime-dependent type, broke `@inferred`, and gave `Vector{Auto}`-style
+containers a `Union` element type.
+
+The 3.0 redesign replaces the multimethod dispatch on `SearchStrategy`
+singletons with a single FFF-owned dispatcher tagged by an enum:
+
+```julia
+search_last(KIND_BRACKET_GALLOP, v, x, hint)
+search_first(KIND_INTERPOLATION_SEARCH, v, x)
+```
+
+The runtime `if/elseif` over `StrategyKind` values is well-predicted in
+hot loops, the kernel bodies inline, and the return path stays concrete
+(`Int`) regardless of which kind is picked at runtime. The
+`bench/enum_vs_typeparam_dispatch.jl` sweep confirms ~0 ns of overhead
+vs. the v2 multimethod path across 20 representative cells.
+
+### What changed at the API level
+
+| v2 | v3 (preferred) | v3 back-compat (shim, removed in v4) |
+|---|---|---|
+| `searchsortedlast(BracketGallop(), v, x, hint)` | `search_last(KIND_BRACKET_GALLOP, v, x, hint)` | `searchsortedlast(BracketGallop(), v, x, hint)` still works |
+| `searchsortedfirst(InterpolationSearch(), v, x)` | `search_first(KIND_INTERPOLATION_SEARCH, v, x)` | `searchsortedfirst(InterpolationSearch(), v, x)` still works |
+| `searchsortedlast(LinearScan(), v, x, hint)` | `search_last(KIND_LINEAR_SCAN, v, x, hint)` | `searchsortedlast(LinearScan(), v, x, hint)` still works |
+| `searchsortedlast(BinaryBracket(), v, x)` | `search_last(KIND_BINARY_BRACKET, v, x)` | `searchsortedlast(BinaryBracket(), v, x)` still works |
+| `searchsortedlast(UniformStep(), r, x)` | `search_last(KIND_UNIFORM_STEP, r, x)` | `searchsortedlast(UniformStep(), r, x)` still works |
+| `searchsortedlast(SIMDLinearScan(), v, x, hint)` | `search_last(KIND_SIMD_LINEAR_SCAN, v, x, hint)` | `searchsortedlast(SIMDLinearScan(), v, x, hint)` still works |
+| `searchsortedlast(ExpFromLeft(), v, x, hint)` | `search_last(KIND_EXP_FROM_LEFT, v, x, hint)` | `searchsortedlast(ExpFromLeft(), v, x, hint)` still works |
+| `searchsortedlast(BitInterpolationSearch(), v, x)` | `search_last(KIND_BIT_INTERPOLATION_SEARCH, v, x)` | `searchsortedlast(BitInterpolationSearch(), v, x)` still works |
+| `findequal(BisectThenSIMD(), v, x)` | `findequal(KIND_BISECT_THEN_SIMD, v, x)` | `findequal(BisectThenSIMD(), v, x)` still works |
+
+Stateful strategies (`Auto`, `GuesserHint`) stay on the multimethod path
+because they carry per-instance data:
+
+```julia
+search_last(Auto(v), v, x, hint)            # v3 preferred
+searchsortedlast(Auto(v), v, x, hint)       # v3 back-compat (shim)
+search_first(GuesserHint(g), v, x)          # v3 preferred
+searchsortedfirst(GuesserHint(g), v, x)     # v3 back-compat (shim)
+```
+
+### Breaking changes — `Auto` resolves at construction
+
+In v2, `Auto()`'s per-query `Base.searchsortedlast(::Auto, v, x, hint)`
+ran the picking logic on every call (consulting `length(v)`, hint
+validity, and `props.is_uniform`). In v3, `Auto` carries a resolved
+`StrategyKind` and per-query dispatch is a one-line forward to
+`search_last(s.kind, v, x, hint)`:
+
+  - `Auto()` defaults to `KIND_BINARY_BRACKET` (safe; matches
+    `Base.searchsortedlast` exactly).
+  - `Auto(v)` resolves the kind from `length(v)` + `SearchProperties(v)`.
+    Pre-pay the probe cost once, get the v2 fast-path on every per-query
+    call afterwards.
+  - `Auto(v, props)` is the same with a pre-computed `props` cache.
+
+The **batched** Auto dispatch (`searchsortedlast!(out, v, queries;
+strategy = Auto())`) still re-resolves the kind from `(v, queries)`
+because the gap heuristic needs the queries; that decision tree is
+type-stable in v3 (returns a `StrategyKind`, dispatched via the enum
+switch into a kind-parameterized loop).
+
+The v2 behaviour of `Auto()` re-picking on every per-query call is
+preserved for batched calls and for callers that explicitly construct
+`Auto(v)` per query. For callers that previously relied on `Auto()` (no
+`v`) picking `LinearScan` on short vectors or `BracketGallop` on long
+vectors per-query, update to `Auto(v)` where `v` is known.
+
+### New: `strategy_kind`
+
+`strategy_kind(s::SearchStrategy)` maps a singleton strategy struct to
+its `StrategyKind` tag, and returns the stored kind for `Auto`.
+`GuesserHint` (genuinely stateful, no singleton tag) throws
+`ArgumentError`.
+
+### `findequal` now accepts a `StrategyKind` directly
+
+```julia
+findequal(KIND_BRACKET_GALLOP, v, x)
+findequal(KIND_BRACKET_GALLOP, v, x, hint)
+```
+
+In addition to the v2 `findequal(strategy_struct, v, x[, hint])` form
+(which still works via the shim).
+
+### Deprecation timeline
+
+The v2 `Base.searchsortedlast(::S, ...)` /
+`Base.searchsortedfirst(::S, ...)` methods for singleton strategy
+structs are scheduled for removal in v4. They emit no depwarn in v3
+because the noise would be unmanageable across the ecosystem; the
+removal will be announced at least one minor cycle in advance.
+
+### Internals — `dispatch.jl` split into `kinds.jl` + `kernels.jl` + `legacy_dispatch.jl`
+
+The v2 `src/dispatch.jl` file (Base.searchsortedlast extensions per
+strategy) is gone. In its place:
+
+  - `src/kinds.jl` — `StrategyKind` enum and `search_last` /
+    `search_first` enum dispatchers.
+  - `src/kernels.jl` — per-strategy kernel functions
+    (`_kernel_last_bracket_gallop`, etc.), lifted out of the v2 method
+    bodies.
+  - `src/legacy_dispatch.jl` — `Base.searchsortedlast(::S, ...)` shims
+    that forward to `search_last(KIND_X, ...)` (one shim per singleton
+    strategy struct).
+
+The `strategy_kind(s)` mapping function is defined alongside the shims.
+
 ## 2.0.0
 
 This is a major rewrite of the sorted-search API. The 1.x surface — a
