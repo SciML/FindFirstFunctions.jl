@@ -266,6 +266,232 @@ end
             @test out2 == searchsortedlast.(Ref(r), unsorted_queries)
         end
 
+        @safetestset "DirectStep" begin
+            using FindFirstFunctions, StableRNGs
+
+            rng = StableRNG(2028)
+
+            @testset "Parity vs Base on AbstractRange (Float64)" begin
+                r = 0.0:0.1:10.0
+                strat = DirectStep(r)
+                for x in (
+                        -1.0, 0.0, 0.05, 0.5, 1.0, 5.5, 9.95, 10.0,
+                        10.0001, 11.0,
+                    )
+                    @test searchsortedlast(strat, r, x) == searchsortedlast(r, x)
+                    @test searchsortedfirst(strat, r, x) == searchsortedfirst(r, x)
+                end
+                # Random fuzz.
+                for _ in 1:500
+                    x = -1.0 + rand(rng) * 12.0
+                    @test searchsortedlast(strat, r, x) == searchsortedlast(r, x)
+                    @test searchsortedfirst(strat, r, x) == searchsortedfirst(r, x)
+                end
+            end
+
+            @testset "Parity vs Base on AbstractRange (Float32)" begin
+                r = Float32(0):Float32(0.5):Float32(20)
+                strat = DirectStep(r)
+                for x in (
+                        Float32(-1), Float32(0), Float32(0.5), Float32(10),
+                        Float32(19.75), Float32(20), Float32(21),
+                    )
+                    @test searchsortedlast(strat, r, x) == searchsortedlast(r, x)
+                    @test searchsortedfirst(strat, r, x) == searchsortedfirst(r, x)
+                end
+            end
+
+            @testset "Parity vs Base on AbstractRange (Int)" begin
+                r = 1:1:100
+                strat = DirectStep(r)
+                for x in (0, 1, 2, 50, 100, 101, -5, 1000)
+                    @test searchsortedlast(strat, r, x) == searchsortedlast(r, x)
+                    @test searchsortedfirst(strat, r, x) == searchsortedfirst(r, x)
+                end
+                # Stepped Int range.
+                r2 = 0:5:500
+                strat2 = DirectStep(r2)
+                for x in (-1, 0, 3, 5, 7, 250, 499, 500, 501)
+                    @test searchsortedlast(strat2, r2, x) == searchsortedlast(r2, x)
+                    @test searchsortedfirst(strat2, r2, x) == searchsortedfirst(r2, x)
+                end
+            end
+
+            @testset "Parity vs UniformStep on the same Range" begin
+                ranges = (
+                    1:100,
+                    0:5:500,
+                    0.0:0.1:10.0,
+                    LinRange(0.0, 10.0, 101),
+                    Float32(0):Float32(0.5):Float32(20),
+                )
+                for r in ranges
+                    strat = DirectStep(r)
+                    for x in (
+                            first(r) - oneunit(first(r)),
+                            first(r),
+                            first(r) + (last(r) - first(r)) / 2,
+                            last(r),
+                            last(r) + oneunit(first(r)),
+                        )
+                        @test searchsortedlast(strat, r, x) ==
+                            searchsortedlast(UniformStep(), r, x)
+                        @test searchsortedfirst(strat, r, x) ==
+                            searchsortedfirst(UniformStep(), r, x)
+                    end
+                end
+            end
+
+            @testset "Parity vs Base on uniform Vector via Val(:uniform)" begin
+                t = collect(0.0:0.1:10.0)
+                strat = DirectStep(t, Val(:uniform))
+                for _ in 1:500
+                    x = -1.0 + rand(rng) * 12.0
+                    @test searchsortedlast(strat, t, x) == searchsortedlast(t, x)
+                    @test searchsortedfirst(strat, t, x) == searchsortedfirst(t, x)
+                end
+            end
+
+            @testset "Edge cases: empty, n=1, n=2, n=10, n=1M" begin
+                # Empty range can't be DirectStep'd (constructor throws), but
+                # the kernel still handles empty `v` if someone constructs a
+                # DirectStep from a different vector and passes empty `v` —
+                # not the documented usage, just defensive. So we exercise
+                # the constructor's error path:
+                @test_throws ArgumentError DirectStep(1:0)
+                @test_throws ArgumentError DirectStep(Float64[], Val(:uniform))
+                @test_throws ArgumentError DirectStep([3.0], Val(:uniform))
+
+                # n=1 range is fine via the range ctor: step is well-defined.
+                r1 = 42:42
+                s1 = DirectStep(r1)
+                for x in (41, 42, 43)
+                    @test searchsortedlast(s1, r1, x) == searchsortedlast(r1, x)
+                    @test searchsortedfirst(s1, r1, x) == searchsortedfirst(r1, x)
+                end
+
+                # n=2.
+                r2 = 0.0:1.0:1.0
+                s2 = DirectStep(r2)
+                for x in (-1.0, 0.0, 0.5, 1.0, 2.0)
+                    @test searchsortedlast(s2, r2, x) == searchsortedlast(r2, x)
+                    @test searchsortedfirst(s2, r2, x) == searchsortedfirst(r2, x)
+                end
+
+                # n=10.
+                r10 = 0.0:0.1:0.9
+                s10 = DirectStep(r10)
+                for _ in 1:100
+                    x = -0.2 + rand(rng) * 1.4
+                    @test searchsortedlast(s10, r10, x) == searchsortedlast(r10, x)
+                    @test searchsortedfirst(s10, r10, x) == searchsortedfirst(r10, x)
+                end
+
+                # n=1M.
+                rbig = range(0.0, 1.0; length = 1_000_000)
+                sbig = DirectStep(rbig)
+                for _ in 1:200
+                    x = -0.1 + rand(rng) * 1.2
+                    @test searchsortedlast(sbig, rbig, x) == searchsortedlast(rbig, x)
+                    @test searchsortedfirst(sbig, rbig, x) == searchsortedfirst(rbig, x)
+                end
+            end
+
+            @testset "NaN / Inf" begin
+                r = 0.0:0.1:10.0
+                strat = DirectStep(r)
+                # Match UniformStep's documented behaviour.
+                @test searchsortedlast(strat, r, NaN) ==
+                    searchsortedlast(UniformStep(), r, NaN)
+                @test searchsortedfirst(strat, r, NaN) ==
+                    searchsortedfirst(UniformStep(), r, NaN)
+                @test searchsortedlast(strat, r, Inf) ==
+                    searchsortedlast(UniformStep(), r, Inf)
+                @test searchsortedfirst(strat, r, Inf) ==
+                    searchsortedfirst(UniformStep(), r, Inf)
+                @test searchsortedlast(strat, r, -Inf) ==
+                    searchsortedlast(UniformStep(), r, -Inf)
+                @test searchsortedfirst(strat, r, -Inf) ==
+                    searchsortedfirst(UniformStep(), r, -Inf)
+            end
+
+            @testset "Reverse ordering on decreasing Range" begin
+                rrev = 10.0:-0.1:0.0
+                strat = DirectStep(rrev)
+                order = Base.Order.Reverse
+                for x in (
+                        -1.0, 0.0, 0.05, 0.5, 1.0, 5.5, 9.95, 10.0,
+                        10.0001, 11.0,
+                    )
+                    @test searchsortedlast(strat, rrev, x; order = order) ==
+                        searchsortedlast(rrev, x, order)
+                    @test searchsortedfirst(strat, rrev, x; order = order) ==
+                        searchsortedfirst(rrev, x, order)
+                end
+                for _ in 1:200
+                    x = -1.0 + rand(rng) * 12.0
+                    @test searchsortedlast(strat, rrev, x; order = order) ==
+                        searchsortedlast(rrev, x, order)
+                    @test searchsortedfirst(strat, rrev, x; order = order) ==
+                        searchsortedfirst(rrev, x, order)
+                end
+            end
+
+            @testset "Hint is ignored" begin
+                r = 0.0:0.1:10.0
+                strat = DirectStep(r)
+                for x in (-1.0, 0.0, 3.3, 9.95, 11.0)
+                    @test searchsortedlast(strat, r, x, 999) ==
+                        searchsortedlast(strat, r, x)
+                    @test searchsortedfirst(strat, r, x, -7) ==
+                        searchsortedfirst(strat, r, x)
+                end
+            end
+
+            @testset "Float roundoff correction" begin
+                # `range(0.0, 1.0; length=11)` has step 0.1 (StepRangeLen).
+                # 0.5 / 0.1 ≈ 4.9999999… on naive division — but DirectStep
+                # uses an exact `inv_step` = 10.0 here, and 0.5 * 10.0 = 5.0
+                # exactly. The correction step covers the broader cases.
+                r = range(0.0, 1.0; length = 11)
+                strat = DirectStep(r)
+                for x in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+                    @test searchsortedlast(strat, r, x) == searchsortedlast(r, x)
+                    @test searchsortedfirst(strat, r, x) == searchsortedfirst(r, x)
+                end
+
+                # A range where 1/step is not exactly representable —
+                # forces the correction path to fire.
+                r2 = 0.0:0.3:3.0
+                strat2 = DirectStep(r2)
+                for x in (0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 3.0)
+                    @test searchsortedlast(strat2, r2, x) == searchsortedlast(r2, x)
+                    @test searchsortedfirst(strat2, r2, x) == searchsortedfirst(r2, x)
+                end
+
+                # LinRange — fixed-point span/(n-1) representation. Roundoff
+                # patterns differ from StepRangeLen, useful for the correction.
+                r3 = LinRange(0.0, 1.0, 11)
+                strat3 = DirectStep(r3)
+                for x in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+                    @test searchsortedlast(strat3, r3, x) == searchsortedlast(r3, x)
+                    @test searchsortedfirst(strat3, r3, x) == searchsortedfirst(r3, x)
+                end
+            end
+
+            @testset "Unsupported ordering falls back to BinaryBracket" begin
+                r = 0.0:0.1:10.0
+                strat = DirectStep(r)
+                custom_order = Base.Order.By(identity)
+                for x in (0.0, 5.5, 10.0)
+                    @test searchsortedlast(strat, r, x; order = custom_order) ==
+                        searchsortedlast(r, x, custom_order)
+                    @test searchsortedfirst(strat, r, x; order = custom_order) ==
+                        searchsortedfirst(r, x, custom_order)
+                end
+            end
+        end
+
         @safetestset "Custom ordering for strategy dispatch" begin
             using FindFirstFunctions:
                 Guesser, GuesserHint, BracketGallop, LinearScan,

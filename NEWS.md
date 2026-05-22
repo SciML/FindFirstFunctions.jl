@@ -1,5 +1,25 @@
 # FindFirstFunctions.jl NEWS
 
+## Unreleased
+
+### Added
+
+  - **`DirectStep` strategy** — a precomputed-reciprocal variant of
+    `UniformStep` for O(1) closed-form index lookup on uniformly-spaced
+    vectors. Stores `first_val`, `inv_step`, and `last_idx` at
+    construction time, eliminating the per-query float division
+    (`fld(diff, step)`) that `UniformStep` runs on every call. The bench
+    sweep at `bench/directstep_sweep.jl` measures a 4–6× per-query
+    latency improvement over `UniformStep` across `n ∈ {100, …, 1M}` and
+    eltype `∈ {Float64, Float32}`.
+
+    Opt-in: construct explicitly via `DirectStep(my_range)` or
+    `DirectStep(v, Val(:uniform))` for a uniformly-spaced `Vector`. Not
+    picked by `Auto` (the enum-tag design has no place to carry the
+    precomputed reciprocal). Supports both `Base.Order.Forward` and
+    `Base.Order.Reverse` natively; falls back to `BinaryBracket` for
+    other orderings.
+
 ## 2.0.0
 
 This is a major rewrite of the sorted-search API. The 1.x surface — a

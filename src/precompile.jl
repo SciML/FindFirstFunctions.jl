@@ -49,6 +49,12 @@ using PrecompileTools: @compile_workload, @setup_workload
         searchsortedfirst(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
         searchsortedlast(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
 
+        # DirectStep — precomputed-reciprocal closed-form lookup on a Range.
+        let r = 0.0:0.5:9.5, strat = DirectStep(r)
+            searchsortedfirst(strat, r, 4.25)
+            searchsortedlast(strat, r, 4.25)
+        end
+
         # Strategy dispatch — batched in-place forms.
         idx_out = Vector{Int}(undef, 4)
         queries = Int64[2, 5, 8, 12]

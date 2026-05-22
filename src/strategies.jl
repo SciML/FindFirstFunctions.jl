@@ -187,6 +187,66 @@ a hint.
 struct UniformStep <: SearchStrategy end
 
 """
+    DirectStep(r::AbstractRange) <: SearchStrategy
+    DirectStep(t::AbstractVector, ::Val{:uniform})
+    DirectStep(first_val::F, inv_step::F, last_idx::Int) where {F}
+
+Closed-form O(1) index lookup with no float division per query. Stores a
+precomputed reciprocal of the step. Per-query work is one subtract, one
+multiply, one truncate, plus a bounds clamp and a one-step roundoff
+correction:
+
+    idx = unsafe_trunc(Int, floor((x - first_val) * inv_step)) + 1
+
+Equivalent to [`UniformStep`](@ref) for `AbstractRange` (and exactly-uniform
+`AbstractVector` when constructed via the explicit `Val(:uniform)` ctor), but
+several times faster because the `fld(diff, step)` float division that
+`UniformStep` runs on every query is hoisted to construction time. The
+trade-off is that `DirectStep` is not a zero-byte singleton — it carries
+three fields (~24 bytes on Float64) versus `UniformStep`'s zero-byte
+singleton — and must be re-constructed if the underlying range mutates.
+
+The stored `first_val` and `inv_step` are promoted to `float(eltype(r))`
+when the eltype is an `Integer` (the reciprocal of an `Int` step isn't
+representable as `Int`), and are kept at the source eltype for `Float32` /
+`Float64` ranges.
+
+Like `UniformStep`, supports both `Base.Order.Forward` and
+`Base.Order.Reverse` orderings natively; any other ordering falls back to
+[`BinaryBracket`](@ref). Ignores any hint that is supplied.
+
+Not picked by [`Auto`](@ref) — `Auto` carries no payload for the
+precomputed reciprocal. Use it opt-in for ranges where the per-query
+division cost of `UniformStep` matters:
+
+```julia
+strat = DirectStep(my_range)
+searchsortedlast(strat, my_range, q)
+```
+"""
+struct DirectStep{F} <: SearchStrategy
+    first_val::F
+    inv_step::F
+    last_idx::Int
+end
+
+function DirectStep(r::AbstractRange{T}) where {T}
+    n = length(r)
+    n == 0 && throw(ArgumentError("DirectStep requires a non-empty range"))
+    s = step(r)
+    F = typeof(first(r) + 1 / s)   # promotion-result type of `first + inv_step`.
+    return DirectStep{F}(F(first(r)), F(1 / s), n)
+end
+
+function DirectStep(t::AbstractVector{T}, ::Val{:uniform}) where {T}
+    n = length(t)
+    n < 2 && throw(ArgumentError("DirectStep requires length ≥ 2"))
+    s = (last(t) - first(t)) / (n - 1)
+    F = typeof(first(t) + 1 / s)
+    return DirectStep{F}(F(first(t)), F(1 / s), n)
+end
+
+"""
     BisectThenSIMD <: SearchStrategy
 
 Equality-search strategy. Binary-bisects `v` down to a small basecase, then

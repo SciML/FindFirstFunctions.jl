@@ -786,6 +786,115 @@ Base.searchsortedfirst(
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
 # ===========================================================================
+# Strategy: DirectStep — O(1) closed-form lookup using a precomputed
+# reciprocal of the step. Functionally equivalent to `UniformStep` but
+# avoids the per-query float division by hoisting `1 / step` into the
+# strategy struct. The trade-off is that the strategy is no longer a
+# zero-byte singleton: it carries `first_val`, `inv_step`, and `last_idx`.
+#
+# Both `Forward` and `Reverse` orderings are supported natively — the sign
+# of `inv_step` carries the direction, just like `step(r)` does for
+# `UniformStep`. Any other ordering falls back to `BinaryBracket`.
+# ===========================================================================
+
+@inline _directstep_supported_order(::Base.Order.ForwardOrdering) = true
+@inline _directstep_supported_order(::Base.Order.ReverseOrdering) = true
+@inline _directstep_supported_order(::Base.Order.Ordering) = false
+
+# Closed-form `searchsortedlast`: largest index `i` with `v[i] <= x` under
+# Forward (or `v[i] >= x` under Reverse). The naive `floor((x - first) *
+# inv_step)` estimate can be off by one ulp due to float roundoff, so we
+# clamp to the legal index range and then apply a one-step correction
+# using the order-aware predicate.
+@inline function _directstep_searchsortedlast(
+        s::DirectStep, v::AbstractVector, x, order::Base.Order.Ordering,
+    )
+    isempty(v) && return firstindex(v) - 1
+    diff = x - s.first_val
+    if diff isa AbstractFloat && !isfinite(diff)
+        # NaN → "x precedes nothing"; ±Inf direction depends on sign of step.
+        # `inv_step < 0` iff the range is decreasing.
+        return isnan(diff) ? (firstindex(v) - 1) :
+            (diff > 0) ⊻ (s.inv_step < 0) ? lastindex(v) :
+            firstindex(v) - 1
+    end
+    nm1 = s.last_idx - 1
+    f = diff * s.inv_step
+    i_raw = unsafe_trunc(Int, floor(f))
+    i = if i_raw < 0
+        firstindex(v) - 1
+    elseif i_raw >= nm1
+        lastindex(v)
+    else
+        firstindex(v) + i_raw
+    end
+    @inbounds if i < lastindex(v) && !Base.Order.lt(order, x, v[i + 1])
+        return i + 1
+    elseif i >= firstindex(v) && i <= lastindex(v) &&
+            Base.Order.lt(order, x, v[i])
+        return i - 1
+    end
+    return i
+end
+
+# Closed-form `searchsortedfirst`: smallest index `i` with `v[i] >= x` under
+# Forward (or `v[i] <= x` under Reverse). Mirrors `UniformStep`'s `cld`
+# path with `ceil(f)` and the opposite tie-break direction.
+@inline function _directstep_searchsortedfirst(
+        s::DirectStep, v::AbstractVector, x, order::Base.Order.Ordering,
+    )
+    isempty(v) && return firstindex(v)
+    diff = x - s.first_val
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (lastindex(v) + 1) :
+            (diff > 0) ⊻ (s.inv_step < 0) ? lastindex(v) + 1 :
+            firstindex(v)
+    end
+    nm1 = s.last_idx - 1
+    f = diff * s.inv_step
+    i_raw = unsafe_trunc(Int, ceil(f))
+    i = if i_raw <= 0
+        firstindex(v)
+    elseif i_raw > nm1
+        lastindex(v) + 1
+    else
+        firstindex(v) + i_raw
+    end
+    @inbounds if i > firstindex(v) && i <= lastindex(v) + 1 &&
+            !Base.Order.lt(order, v[i - 1], x)
+        return i - 1
+    end
+    @inbounds if i <= lastindex(v) && Base.Order.lt(order, v[i], x)
+        return i + 1
+    end
+    return i
+end
+
+Base.searchsortedlast(
+    s::DirectStep, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = _directstep_supported_order(order) ?
+    _directstep_searchsortedlast(s, v, x, order) :
+    searchsortedlast(BinaryBracket(), v, x; order = order)
+
+Base.searchsortedfirst(
+    s::DirectStep, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = _directstep_supported_order(order) ?
+    _directstep_searchsortedfirst(s, v, x, order) :
+    searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# Hinted forms — DirectStep ignores any hint (the closed form doesn't need one).
+Base.searchsortedlast(
+    s::DirectStep, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedlast(s, v, x; order = order)
+Base.searchsortedfirst(
+    s::DirectStep, v::AbstractVector, x, ::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedfirst(s, v, x; order = order)
+
+# ===========================================================================
 # Strategy: BisectThenSIMD — equality-search; positional dispatch falls back
 # to BinaryBracket. (The `findequal(BisectThenSIMD(), v, x)` shortcut lives
 # in `findequal.jl`.)

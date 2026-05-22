@@ -25,6 +25,7 @@ callers who already know their access pattern and want to pin a strategy.
 | [`BitInterpolationSearch`](@ref FindFirstFunctions.BitInterpolationSearch) | `DenseVector{Float64}` and log-spaced (geometric) — opt-in, `Auto` does not pick | O(1) | O(log n) | no |
 | [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket) | no hint available, or fallback | O(log n) | O(log n) | no |
 | [`UniformStep`](@ref FindFirstFunctions.UniformStep) | `v isa AbstractRange` (or known-uniformly-spaced) | O(1) | O(1) | no |
+| [`DirectStep`](@ref FindFirstFunctions.DirectStep) | `v isa AbstractRange` with random / cold-hint queries — beats `UniformStep` by hoisting `1 / step` to construction (no per-query float division) | O(1) | O(1) | no |
 | [`GuesserHint`](@ref FindFirstFunctions.GuesserHint) | repeated correlated lookups against the same `v` | O(1) | ~2 log₂ n | self-provided |
 | [`Auto`](@ref FindFirstFunctions.Auto) | unknown access pattern | varies | varies | yes if supplied |
 
@@ -44,6 +45,7 @@ FindFirstFunctions.BitInterpolationSearch
 FindFirstFunctions.BinaryBracket
 FindFirstFunctions.BisectThenSIMD
 FindFirstFunctions.UniformStep
+FindFirstFunctions.DirectStep
 FindFirstFunctions.Auto
 FindFirstFunctions.SearchProperties
 ```
@@ -229,6 +231,55 @@ Plain `Base.searchsortedlast` / `Base.searchsortedfirst`. Provided as a
 strategy so that callers can opt out of hint-based behaviour explicitly, and
 so that other strategies have a well-defined name to fall back to. Ignores
 any hint that is supplied.
+
+### DirectStep
+
+A precomputed-reciprocal variant of [`UniformStep`](@ref FindFirstFunctions.UniformStep):
+the same O(1) closed-form lookup, but with `1 / step(r)` hoisted into the
+strategy struct at construction time. Per-query work becomes one subtract,
+one multiply, one truncate, one bounds clamp, and the one-step roundoff
+correction — no float division.
+
+The bench sweep at `bench/directstep_sweep.jl` measures DirectStep at ~15
+ns/q on Float64 ranges and ~9 ns/q on Float32 ranges, **independent of
+`n`**, vs `UniformStep`'s ~60–70 ns/q on the same workloads. The win is
+4–6× across the full sweep (n ∈ {100, 1k, 10k, 100k, 1M}; eltype ∈
+{Float64, Float32}). The vector-path comparison
+(`DirectStep(v, Val(:uniform))` vs `BinaryBracket` on a `Vector{Float64}`
+constructed from a uniform range) also wins by ~4× at n=10k.
+
+The trade-offs:
+
+  - `DirectStep` is not a zero-byte singleton — it carries three fields
+    (~24 bytes on `Float64`). Callers must construct one explicitly:
+    ```julia
+    strat = DirectStep(my_range)
+    searchsortedlast(strat, my_range, q)
+    ```
+  - `Auto` does not pick `DirectStep` because `Auto`'s enum-tag design
+    has no clean way to carry the precomputed reciprocal payload. Wiring
+    it into `Auto` is a follow-up question (and a breaking change to
+    `Auto`'s API surface).
+  - For `Integer` element types the constructor promotes `first_val` and
+    `inv_step` to `float(eltype(r))` — the reciprocal of an `Int` step
+    isn't representable as `Int`.
+
+Use `DirectStep` when:
+
+  - `v isa AbstractRange` (or a `Vector` that is exactly uniformly-spaced
+    and can be constructed via the `Val(:uniform)` ctor) **and**
+  - The query positions are random / cold-hint (no useful hint available)
+    — `UniformStep`'s per-query `fld(diff, step)` float division
+    dominates the per-call time in this regime.
+
+`BracketGallop` with a hint that is already near the answer can beat
+`DirectStep` (~22 ns/q vs ~15 ns/q at n=100), but only when the hint is
+genuinely close — once the hint is stale, `BracketGallop` scales with
+`log₂ n` and crosses over above `DirectStep` at every measured `n ≥ 1k`.
+
+Like `UniformStep`, `DirectStep` supports both `Base.Order.Forward` and
+`Base.Order.Reverse` orderings natively; any other ordering (`By`, `Lt`,
+…) falls back to `BinaryBracket`. Ignores any hint.
 
 ### Auto
 
