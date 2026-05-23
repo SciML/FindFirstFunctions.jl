@@ -242,15 +242,20 @@ end
             # Auto on AbstractRange short-circuits to the closed-form path —
             # the answer matches Base's range-aware overload and the call is
             # near-zero overhead (a small kwarg trampoline shows up under
-            # `@allocated`, but no large heap traffic).
+            # `@allocated`, but no large heap traffic). The bound was raised
+            # from `< 64` to `<= 64` because `SearchProperties{Float64}` now
+            # carries `first_val::Float64` + `inv_step::Float64`, bumping
+            # `Auto{Float64}` from 16 to 32 bytes — Julia 1.10's kwarg
+            # trampoline allocates exactly 64 bytes for the resulting boxed
+            # NamedTuple (1.11 elides the allocation entirely).
             r_big = 0.0:0.001:100.0
             @test searchsortedlast(Auto(), r_big, 50.5) == searchsortedlast(r_big, 50.5)
             @test searchsortedfirst(Auto(), r_big, 50.5) ==
                 searchsortedfirst(r_big, 50.5)
             # Warm up once, then verify allocation is tiny (kwarg trampoline only).
             searchsortedlast(Auto(), r_big, 50.5)
-            @test @allocated(searchsortedlast(Auto(), r_big, 50.5)) < 64
-            @test @allocated(searchsortedfirst(Auto(), r_big, 50.5)) < 64
+            @test @allocated(searchsortedlast(Auto(), r_big, 50.5)) <= 64
+            @test @allocated(searchsortedfirst(Auto(), r_big, 50.5)) <= 64
 
             # Batched path on AbstractRange.
             r = 0.0:0.5:100.0
