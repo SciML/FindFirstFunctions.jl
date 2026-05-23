@@ -79,8 +79,12 @@ end
 end
 @inline _auto_simd_eligible(::AbstractVector, ::SearchProperties) = false
 
-# Uniformity check.
-@inline _auto_is_uniform(::AbstractRange, ::SearchProperties) = true
+# Uniformity check. `AbstractRange{<:Real}` is always uniform; for non-Real
+# range eltypes (e.g. Unitful `StepRange{Quantity}`) the props-aware
+# closed-form path is unsafe, so we fall through to the `is_uniform` flag
+# in `props` — which is `false` for non-Real numeric eltypes (set by the
+# `SearchProperties(::AbstractVector{<:Number})` overload).
+@inline _auto_is_uniform(::AbstractRange{<:Real}, ::SearchProperties) = true
 @inline _auto_is_uniform(::AbstractVector, p::SearchProperties) =
     p.has_props && p.is_uniform
 

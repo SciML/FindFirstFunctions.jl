@@ -135,7 +135,7 @@ in the result so `UniformStep`'s closed-form path needs no per-query
 division.
 """
 function SearchProperties(
-        v::AbstractVector{<:Number};
+        v::AbstractVector{<:Real};
         linear_tolerance::Real = 1.0e-3,
         is_uniform::Union{Nothing, Bool} = nothing,
     )
@@ -161,6 +161,29 @@ function SearchProperties(
         flag_uniform,
         first_val,
         inv_step,
+    )
+end
+
+# Non-Real numeric eltype (e.g. Unitful `Quantity`, `Complex`): scalar
+# conversion `T(::Quantity)` is unsafe (dimensional / non-Real), so we
+# can't bake `first_val` / `inv_step` into the struct. Run the linearity
+# probe (which only requires `Number` arithmetic) to populate
+# `is_linear` / `has_nan` / `is_log_linear`, but leave `is_uniform = false`
+# so the closed-form UniformStep kernel is never invoked.
+function SearchProperties(
+        v::AbstractVector{<:Number};
+        linear_tolerance::Real = 1.0e-3,
+        is_uniform::Union{Nothing, Bool} = nothing,
+    )
+    tol = Float64(linear_tolerance)
+    err = _sampled_linear_err(v)
+    return SearchProperties{Float64}(
+        true,
+        err <= tol,
+        _has_nan(v),
+        _sampled_looks_log_linear(v, tol),
+        false,                       # never uniform — closed-form unsafe.
+        0.0, 0.0,
     )
 end
 
