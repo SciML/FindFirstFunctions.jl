@@ -175,7 +175,7 @@ struct GuesserHint{G} <: SearchStrategy
 end
 
 """
-    SearchProperties
+    SearchProperties{T}
 
 Cached, non-allocating facts about a sorted vector. Pass to [`Auto`](@ref)
 via `Auto(props)` to skip the per-call probes that the default `Auto()` runs
@@ -186,24 +186,46 @@ Default-constructed (`SearchProperties()`) is the "no information" sentinel:
 `Auto`. Construct via `SearchProperties(v::AbstractVector)` to populate the
 fields by running the probes once.
 
+`T` is the **data ratio type** — the type of `oneunit(eltype(v)) /
+oneunit(eltype(v))`, so e.g. `SearchProperties{Float64}` for
+`Vector{Int}` (because `Int/Int` promotes to `Float64`) or `Vector{Float64}`,
+`SearchProperties{Float32}` for `Vector{Float32}`. For non-`Number` eltypes
+the default is `Float64` and `has_props = false`.
+
 Currently consumed by `Auto`:
 
   - `is_linear` — gates `InterpolationSearch` in batched dispatch.
   - `has_nan` (Float64 only) — gates `SIMDLinearScan` eligibility.
-  - `is_uniform` — short-circuits to [`UniformStep`](@ref) when set.
+  - `is_uniform` — short-circuits to [`UniformStep`](@ref) when set, with
+    `first_val` and `inv_step` baked in for closed-form O(1) lookup.
+
+When `is_uniform = true`, `first_val` and `inv_step` hold the precomputed
+data needed by `UniformStep`'s closed-form path
+(`idx = floor((x - first_val) * inv_step) + 1`). When `is_uniform = false`
+they are `zero(T)` and never consulted.
 
 The `is_log_linear` field is populated for callers that want to manually
 pin [`BitInterpolationSearch`](@ref); `Auto` does not consume it.
 """
-struct SearchProperties
+struct SearchProperties{T}
     has_props::Bool
     is_linear::Bool
     has_nan::Bool
     is_log_linear::Bool
     is_uniform::Bool
+    first_val::T
+    inv_step::T
 end
 
-SearchProperties() = SearchProperties(false, false, false, false, false)
+# Data ratio type used by SearchProperties{T}: `1/oneunit(eltype(v))` promotion.
+# `Int → Float64`, `Float64 → Float64`, `Float32 → Float32`.
+@inline _ratio_type(::Type{T}) where {T <: AbstractFloat} = T
+@inline _ratio_type(::Type{T}) where {T <: Number} = typeof(oneunit(T) / oneunit(T))
+@inline _ratio_type(::Type) = Float64
+
+SearchProperties() = SearchProperties{Float64}(
+    false, false, false, false, false, 0.0, 0.0,
+)
 
 """
     Auto <: SearchStrategy
@@ -243,15 +265,18 @@ mutates.
   - `props::SearchProperties` — cached properties used by the batched
     decision tree.
 """
-struct Auto <: SearchStrategy
+struct Auto{T} <: SearchStrategy
     kind::StrategyKind
-    props::SearchProperties
+    props::SearchProperties{T}
 end
 
-Auto() = Auto(KIND_BINARY_BRACKET, SearchProperties())
-Auto(props::SearchProperties) = Auto(_default_kind_from_props(props), props)
+Auto() = Auto{Float64}(KIND_BINARY_BRACKET, SearchProperties())
+Auto(props::SearchProperties{T}) where {T} =
+    Auto{T}(_default_kind_from_props(props), props)
 Auto(v::AbstractVector) = Auto(v, SearchProperties(v))
-Auto(v::AbstractVector, props::SearchProperties) = Auto(_auto_resolve_kind(v, props), props)
+function Auto(v::AbstractVector, props::SearchProperties{T}) where {T}
+    return Auto{T}(_auto_resolve_kind(v, props), props)
+end
 
 # When props alone is available (no `v`), the best we can do is pick
 # `UniformStep` if `props.is_uniform`. Otherwise fall back to the safe

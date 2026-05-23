@@ -110,12 +110,14 @@ end
 @inline _sampled_looks_log_linear(::AbstractVector, ::Float64 = _AUTO_LINEAR_REL_TOLERANCE) = false
 
 """
-    SearchProperties(v::AbstractVector; linear_tolerance = 1.0e-3, is_uniform = false)
+    SearchProperties(v::AbstractVector; linear_tolerance = 1.0e-3, is_uniform = nothing)
 
 Run the linearity probe and (for floating-point eltypes) the NaN scan on `v`,
-returning the populated [`SearchProperties`](@ref). Cost is O(n) on
-floating-point vectors because of the NaN scan; for integer and non-numeric
-eltypes the cost is O(1) — only the sampled-linearity probe runs.
+returning the populated [`SearchProperties{T}`](@ref) where `T` is the data
+ratio type (e.g. `Float64` for `Vector{Int}` or `Vector{Float64}`,
+`Float32` for `Vector{Float32}`). Cost is O(n) on floating-point vectors
+because of the NaN scan; for integer and non-numeric eltypes the cost is
+O(1) — only the sampled-linearity probe runs.
 
 `linear_tolerance` controls the maximum relative deviation accepted by the
 sampled-linearity probe. The default `1e-3` (0.1%) matches `Auto`'s
@@ -126,30 +128,50 @@ more conservative.
 
 `is_uniform` is a caller-supplied flag for `Vector`s that are exactly
 uniformly spaced. Setting it `true` opts the vector into
-[`UniformStep`](@ref)'s closed-form O(1) path via `Auto`. There is no
-detection probe — uniform spacing on a `Vector` can't be confirmed
-cheaply, and an approximate-uniform vector would give wrong answers
-under `UniformStep`'s exact-step assumption. For `AbstractRange` inputs
-the flag is set automatically by the dedicated overload below.
+[`UniformStep`](@ref)'s closed-form O(1) path via `Auto`. The default
+`nothing` infers from the tight uniformity probe. When `true` (either
+detected or supplied), `first_val` and `inv_step` are computed and stored
+in the result so `UniformStep`'s closed-form path needs no per-query
+division.
 """
 function SearchProperties(
-        v::AbstractVector;
+        v::AbstractVector{<:Number};
         linear_tolerance::Real = 1.0e-3,
         is_uniform::Union{Nothing, Bool} = nothing,
     )
+    T = _ratio_type(eltype(v))
     tol = Float64(linear_tolerance)
     # One scan produces both `is_linear` and the uniformity-deviation
     # check. `is_uniform = nothing` (default) means "infer from the
     # probe"; an explicit Bool overrides.
     err = _sampled_linear_err(v)
     detected_uniform = err <= _UNIFORM_REL_TOLERANCE
-    return SearchProperties(
+    flag_uniform = is_uniform === nothing ? detected_uniform : is_uniform
+    first_val, inv_step = if flag_uniform && length(v) >= 2
+        # Closed-form `inv_step` from sampled endpoints. Promotes Int → Float64.
+        @inbounds T(v[1]), T(length(v) - 1) / T(v[end] - v[1])
+    else
+        zero(T), zero(T)
+    end
+    return SearchProperties{T}(
         true,
         err <= tol,
         _has_nan(v),
         _sampled_looks_log_linear(v, tol),
-        is_uniform === nothing ? detected_uniform : is_uniform,
+        flag_uniform,
+        first_val,
+        inv_step,
     )
+end
+
+# Non-numeric eltype: `Float64` default T, `has_props = false`. Probes are
+# meaningless on non-Number data, so the result is the sentinel value.
+function SearchProperties(
+        v::AbstractVector;
+        linear_tolerance::Real = 1.0e-3,
+        is_uniform::Union{Nothing, Bool} = nothing,
+    )
+    return SearchProperties()
 end
 
 """
@@ -170,6 +192,10 @@ probe — every property is known statically from the type:
     `exp(x)` values, which Julia represents as a `Vector`, not an
     `AbstractRange`.
 
+The `first_val` and `inv_step` fields are populated from `first(r)` and
+`1/step(r)` to skip the per-query division in `UniformStep`'s closed-form
+path.
+
 `linear_tolerance` is accepted for signature compatibility but ignored
 — the probes are skipped.
 """
@@ -177,5 +203,19 @@ function SearchProperties(
         v::AbstractRange{<:Real};
         linear_tolerance::Real = 1.0e-3,
     )
-    return SearchProperties(true, true, false, false, true)
+    T = _ratio_type(eltype(v))
+    first_val, inv_step = if length(v) >= 1
+        f = T(first(v))
+        s = T(step(v))
+        if iszero(s)
+            f, zero(T)
+        else
+            f, one(T) / s
+        end
+    else
+        zero(T), zero(T)
+    end
+    return SearchProperties{T}(
+        true, true, false, false, true, first_val, inv_step,
+    )
 end

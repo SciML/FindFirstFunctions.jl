@@ -548,14 +548,15 @@ end
             # because InterpolationSearch's bad guess just makes BracketGallop
             # wider, never incorrect.
             v_log = exp.(range(0.0, 10.0; length = 4096))
-            lying = SearchProperties(true, true, false, false, false)
+            lying = SearchProperties{Float64}(true, true, false, false, false, 0.0, 0.0)
             tt_log = sort!(rand(StableRNG(11), 8) .* (v_log[end] - v_log[1]) .+ v_log[1])
             out_lying = Vector{Int}(undef, length(tt_log))
             searchsortedlast!(out_lying, v_log, tt_log; strategy = Auto(lying))
             @test out_lying == searchsortedlast.(Ref(v_log), tt_log)
 
-            # Bits-ness: SearchProperties must be isbits so it doesn't allocate.
-            @test isbitstype(SearchProperties)
+            # Bits-ness: SearchProperties{T} must be isbits so it doesn't allocate.
+            @test isbitstype(SearchProperties{Float64})
+            @test isbitstype(SearchProperties{Float32})
 
             # is_log_linear field: populated by SearchProperties(v) on
             # geometric data, rejected on linear / two-scale data.
@@ -597,6 +598,124 @@ end
             v_uniform_collected = collect(0.0:0.5:50.0)
             @test !SearchProperties(v_uniform_collected; is_uniform = false).is_uniform
             @test SearchProperties(v_log_collected; is_uniform = true).is_uniform
+        end
+
+        @safetestset "SearchProperties{T} parametric eltype" begin
+            using FindFirstFunctions
+            using FindFirstFunctions: SearchProperties, _ratio_type
+
+            # Float64 vector / Float64 range → SearchProperties{Float64}.
+            @test SearchProperties(collect(0.0:0.1:10.0)) isa SearchProperties{Float64}
+            @test SearchProperties(0.0:0.1:10.0) isa SearchProperties{Float64}
+            @test SearchProperties(LinRange(0.0, 10.0, 101)) isa SearchProperties{Float64}
+
+            # Float32 vector / range → SearchProperties{Float32}.
+            @test SearchProperties(collect(Float32(0):Float32(0.1):Float32(10))) isa
+                SearchProperties{Float32}
+            @test SearchProperties(Float32(0):Float32(0.1):Float32(10)) isa
+                SearchProperties{Float32}
+            @test SearchProperties(LinRange(Float32(0), Float32(10), 101)) isa
+                SearchProperties{Float32}
+
+            # Int vector / range → SearchProperties{Float64} (ratio promotes).
+            @test SearchProperties(collect(1:100)) isa SearchProperties{Float64}
+            @test SearchProperties(1:100) isa SearchProperties{Float64}
+            @test _ratio_type(Int) === Float64
+            @test _ratio_type(Float64) === Float64
+            @test _ratio_type(Float32) === Float32
+
+            # Non-numeric eltype → SearchProperties{Float64} sentinel,
+            # has_props = false.
+            ps = SearchProperties(["a", "b", "c"])
+            @test ps isa SearchProperties{Float64}
+            @test !ps.has_props
+            @test !ps.is_uniform
+            @test ps.first_val == 0.0
+            @test ps.inv_step == 0.0
+
+            # Default sentinel.
+            @test SearchProperties() isa SearchProperties{Float64}
+            @test !SearchProperties().has_props
+
+            # first_val / inv_step are populated when is_uniform = true.
+            p = SearchProperties(0.0:0.5:10.0)
+            @test p.first_val == 0.0
+            @test p.inv_step == 2.0    # 1/0.5
+
+            # Vector path matches range path on uniform data.
+            v = collect(0.0:0.5:10.0)
+            p_v = SearchProperties(v)
+            @test p_v.first_val == 0.0
+            @test p_v.inv_step ≈ 2.0   # (n-1)/(v[end]-v[1]) = 20/10 = 2
+
+            # Non-uniform vector: first_val / inv_step are zero.
+            p_nonuniform = SearchProperties(sort!(rand(100)))
+            @test !p_nonuniform.is_uniform
+            @test p_nonuniform.first_val == 0.0
+            @test p_nonuniform.inv_step == 0.0
+        end
+
+        @safetestset "Auto{T} parametric + props-aware UniformStep kernel" begin
+            using FindFirstFunctions
+            using FindFirstFunctions:
+                SearchProperties, Auto, KIND_UNIFORM_STEP,
+                search_last, search_first
+
+            # Auto{T} carries SearchProperties{T}.
+            @test Auto() isa Auto{Float64}
+            @test Auto(collect(1:100)) isa Auto{Float64}
+            @test Auto(collect(0.0:0.5:10.0)) isa Auto{Float64}
+            @test Auto(collect(Float32(0):Float32(0.5):Float32(10))) isa Auto{Float32}
+            @test Auto(0.0:0.5:10.0) isa Auto{Float64}
+            @test Auto(Float32(0):Float32(0.5):Float32(10)) isa Auto{Float32}
+
+            # The props-aware UniformStep path is taken when kind ===
+            # KIND_UNIFORM_STEP. For uniform data, Auto resolves to
+            # KIND_UNIFORM_STEP and `search_last(::Auto, ...)` uses the
+            # precomputed first_val + inv_step closed-form path.
+            for r in (
+                    0.0:0.5:100.0,
+                    LinRange(0.0, 100.0, 201),
+                    collect(0.0:0.5:100.0),
+                    collect(1:1000),
+                )
+                a = Auto(r)
+                @test a.kind === KIND_UNIFORM_STEP
+                for x in (-1.0, 0.0, 1.7, 42.5, 99.9, 100.0, 1000.0)
+                    if x > maximum(r) + 1 && eltype(r) <: Integer && !isinteger(x)
+                        # skip mixed-type Int range queries with non-int x
+                        continue
+                    end
+                    want_last = searchsortedlast(r, x)
+                    want_first = searchsortedfirst(r, x)
+                    @test search_last(a, r, x) == want_last
+                    @test search_first(a, r, x) == want_first
+                    # Hinted form takes the same path.
+                    @test search_last(a, r, x, 1) == want_last
+                    @test search_first(a, r, x, 1) == want_first
+                end
+            end
+
+            # Reverse-order range.
+            r_rev = 10.0:-0.5:0.0
+            a_rev = Auto(r_rev)
+            @test a_rev.kind === KIND_UNIFORM_STEP
+            for x in (-1.0, 0.0, 2.7, 5.0, 10.5)
+                @test search_last(a_rev, r_rev, x; order = Base.Order.Reverse) ==
+                    searchsortedlast(r_rev, x, Base.Order.Reverse)
+                @test search_first(a_rev, r_rev, x; order = Base.Order.Reverse) ==
+                    searchsortedfirst(r_rev, x, Base.Order.Reverse)
+            end
+
+            # An Auto built from props alone (no v) still routes to the
+            # props-aware kernel when kind === KIND_UNIFORM_STEP.
+            p = SearchProperties(0.0:0.5:10.0)
+            a_p = Auto(p)
+            @test a_p.kind === KIND_UNIFORM_STEP
+            for x in (0.0, 1.7, 5.0, 9.9, 10.0)
+                @test search_last(a_p, 0.0:0.5:10.0, x) ==
+                    searchsortedlast(0.0:0.5:10.0, x)
+            end
         end
 
         @safetestset "Batched in-place searchsorted!" begin
@@ -1101,16 +1220,22 @@ end
                 @test @inferred(search_last(a, v, 50)) === 50
             end
 
-            @testset "Vector{Auto} has concrete eltype" begin
-                # Mixed-underlying-kind Vector{Auto}: even when each Auto
-                # was constructed from a different v / props, the
-                # element type is `Auto` (concrete), not
-                # `Union{Auto{...}, Auto{...}}` or `Any`.
-                a1 = Auto(collect(1:100))          # KIND_UNIFORM_STEP
-                a2 = Auto(rand(StableRNG(10), 100))  # KIND_BRACKET_GALLOP (not uniform)
-                a3 = Auto(collect(1:8))            # KIND_LINEAR_SCAN
-                v = Auto[a1, a2, a3]
-                @test eltype(v) === Auto
+            @testset "Vector{Auto{T}} has concrete eltype" begin
+                # Mixed-underlying-kind Vector{Auto{T}}: even when each Auto
+                # was constructed from a different v / props (but with the
+                # same ratio eltype T), the element type is `Auto{T}`
+                # (concrete), not `Union{...}` or `Any`. `Vector{Int}` and
+                # `Vector{Float64}` both ratio-promote to `Float64`, so
+                # `Auto(collect(1:100))` and `Auto(rand(100))` are both
+                # `Auto{Float64}`.
+                a1 = Auto(collect(1:100))          # KIND_UNIFORM_STEP (Int → Float64)
+                a2 = Auto(rand(StableRNG(10), 100))  # KIND_BRACKET_GALLOP (Float64)
+                a3 = Auto(collect(1:8))            # KIND_LINEAR_SCAN (Int → Float64)
+                @test a1 isa Auto{Float64}
+                @test a2 isa Auto{Float64}
+                @test a3 isa Auto{Float64}
+                v = Auto{Float64}[a1, a2, a3]
+                @test eltype(v) === Auto{Float64}
                 @test isconcretetype(eltype(v))
             end
 

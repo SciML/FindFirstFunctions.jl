@@ -281,8 +281,19 @@ function _searchsortedlast_batched!(
         queries_sorted::Union{Nothing, Bool},
     )
     if _auto_is_uniform(v, s.props)
-        @inbounds for k in eachindex(queries)
-            idx_out[k] = search_last(KIND_UNIFORM_STEP, v, queries[k]; order = order)
+        # If props is populated, use the closed-form props-aware kernel
+        # (no per-query division). Otherwise fall back to the range-based
+        # UniformStep kernel (uses `step(r)`).
+        if s.props.has_props && s.props.is_uniform
+            @inbounds for k in eachindex(queries)
+                idx_out[k] = _kernel_last_uniform_step_props(
+                    s.props, v, queries[k], order,
+                )
+            end
+        else
+            @inbounds for k in eachindex(queries)
+                idx_out[k] = search_last(KIND_UNIFORM_STEP, v, queries[k]; order = order)
+            end
         end
         return idx_out
     end
@@ -307,8 +318,16 @@ function _searchsortedfirst_batched!(
         queries_sorted::Union{Nothing, Bool},
     )
     if _auto_is_uniform(v, s.props)
-        @inbounds for k in eachindex(queries)
-            idx_out[k] = search_first(KIND_UNIFORM_STEP, v, queries[k]; order = order)
+        if s.props.has_props && s.props.is_uniform
+            @inbounds for k in eachindex(queries)
+                idx_out[k] = _kernel_first_uniform_step_props(
+                    s.props, v, queries[k], order,
+                )
+            end
+        else
+            @inbounds for k in eachindex(queries)
+                idx_out[k] = search_first(KIND_UNIFORM_STEP, v, queries[k]; order = order)
+            end
         end
         return idx_out
     end

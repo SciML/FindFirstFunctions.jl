@@ -566,3 +566,81 @@ end
 @inline _kernel_first_uniform_step(
     v::AbstractVector, x, order::Base.Order.Ordering,
 ) = _kernel_first_binary_bracket(v, x, order)
+
+# ===========================================================================
+# Props-aware UniformStep — closed-form O(1) lookup using a precomputed
+# `inv_step` baked into `SearchProperties{T}`. Subsumes the old DirectStep
+# strategy: the per-query float division `fld(diff, step)` is hoisted to
+# `SearchProperties` construction time, leaving the hot path with one
+# subtract, one multiply, one truncate, plus a bounds clamp and a one-step
+# roundoff correction.
+#
+# Both `Forward` and `Reverse` orderings are supported — the sign of
+# `inv_step` carries the direction. Any other ordering falls back to
+# BinaryBracket.
+# ===========================================================================
+
+@inline function _kernel_last_uniform_step_props(
+        props::SearchProperties, v::AbstractVector, x, order::Base.Order.Ordering,
+    )
+    _uniformstep_supported_order(order) ||
+        return _kernel_last_binary_bracket(v, x, order)
+    isempty(v) && return firstindex(v) - 1
+    diff = x - props.first_val
+    if diff isa AbstractFloat && !isfinite(diff)
+        # NaN → "x precedes nothing"; ±Inf direction depends on sign of step.
+        # `inv_step < 0` iff the range is decreasing.
+        return isnan(diff) ? (firstindex(v) - 1) :
+            (diff > 0) ⊻ (props.inv_step < 0) ? lastindex(v) :
+            firstindex(v) - 1
+    end
+    nm1 = length(v) - 1
+    f = diff * props.inv_step
+    i_raw = unsafe_trunc(Int, floor(f))
+    i = if i_raw < 0
+        firstindex(v) - 1
+    elseif i_raw >= nm1
+        lastindex(v)
+    else
+        firstindex(v) + i_raw
+    end
+    @inbounds if i < lastindex(v) && !Base.Order.lt(order, x, v[i + 1])
+        return i + 1
+    elseif i >= firstindex(v) && i <= lastindex(v) &&
+            Base.Order.lt(order, x, v[i])
+        return i - 1
+    end
+    return i
+end
+
+@inline function _kernel_first_uniform_step_props(
+        props::SearchProperties, v::AbstractVector, x, order::Base.Order.Ordering,
+    )
+    _uniformstep_supported_order(order) ||
+        return _kernel_first_binary_bracket(v, x, order)
+    isempty(v) && return firstindex(v)
+    diff = x - props.first_val
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (lastindex(v) + 1) :
+            (diff > 0) ⊻ (props.inv_step < 0) ? lastindex(v) + 1 :
+            firstindex(v)
+    end
+    nm1 = length(v) - 1
+    f = diff * props.inv_step
+    i_raw = unsafe_trunc(Int, ceil(f))
+    i = if i_raw <= 0
+        firstindex(v)
+    elseif i_raw > nm1
+        lastindex(v) + 1
+    else
+        firstindex(v) + i_raw
+    end
+    @inbounds if i > firstindex(v) && i <= lastindex(v) + 1 &&
+            !Base.Order.lt(order, v[i - 1], x)
+        return i - 1
+    end
+    @inbounds if i <= lastindex(v) && Base.Order.lt(order, v[i], x)
+        return i + 1
+    end
+    return i
+end

@@ -29,9 +29,17 @@ using PrecompileTools: @compile_workload, @setup_workload
                 LinearScan(), SIMDLinearScan(), BracketGallop(), ExpFromLeft(),
                 InterpolationSearch(), BinaryBracket(), Auto(),
                 Auto(SearchProperties(linear_vec)),
+                Auto(linear_vec),
             )
             searchsortedfirst(strategy, vec_int64, Int64(8), Int64(1))
             searchsortedlast(strategy, vec_int64, Int64(8), Int64(1))
+        end
+        # Auto-with-uniform-range — exercises the props-aware UniformStep kernel.
+        let r = 0.0:0.5:10.0
+            auto_r = Auto(r)
+            searchsortedlast(auto_r, r, 3.7)
+            searchsortedfirst(auto_r, r, 3.7)
+            searchsortedlast(auto_r, r, 3.7, 1)
         end
         # findequal: generic + BisectThenSIMD shortcut for Int64 dense vectors.
         for strategy in (

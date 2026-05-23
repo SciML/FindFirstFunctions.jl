@@ -77,6 +77,45 @@ preserved for batched calls and for callers that explicitly construct
 `v`) picking `LinearScan` on short vectors or `BracketGallop` on long
 vectors per-query, update to `Auto(v)` where `v` is known.
 
+### New: parametric `SearchProperties{T}` with precomputed `inv_step`
+
+`SearchProperties` is now parametric on the data ratio type
+`T = typeof(oneunit(eltype(v)) / oneunit(eltype(v)))` (`Float64` for
+`Vector{Int}` or `Vector{Float64}`, `Float32` for `Vector{Float32}`, etc.).
+The struct carries two new fields:
+
+  - `first_val::T` — `v[1]` (or `first(r)` for an `AbstractRange`).
+  - `inv_step::T` — the precomputed reciprocal `1 / step`. For an
+    `AbstractRange`, `1 / step(r)`. For an exactly-uniform `AbstractVector`,
+    `(length(v) - 1) / (v[end] - v[1])`.
+
+These fields are populated when `is_uniform = true` and zero otherwise.
+They feed the new **props-aware `UniformStep` kernel** invoked by
+`Auto(v)` when the resolved kind is `KIND_UNIFORM_STEP`:
+
+```julia
+# v3 closed-form O(1) lookup with no per-query division:
+a = Auto(0.0:0.5:100.0)           # kind = KIND_UNIFORM_STEP, inv_step = 2.0
+search_last(a, r, 3.7)            # → floor((3.7 - 0.0) * 2.0) + 1 = 8
+```
+
+This subsumes the never-merged `DirectStep` strategy (PR #74) — its
+precomputed-reciprocal closed-form is now folded into `UniformStep` via
+the `SearchProperties{T}` payload.
+
+The raw `UniformStep()` singleton kept its old behaviour: when called via
+`searchsortedlast(UniformStep(), r, x)` (no props) it still uses
+`fld(diff, step)` per query. Auto routes through the props-aware kernel
+because Auto carries the precomputed `SearchProperties{T}`.
+
+### `Auto{T}` parametric
+
+`Auto` now carries `props::SearchProperties{T}` and is itself parametric
+on `T`. `Auto(v)` returns an `Auto{T}` where `T` is the ratio type of
+`eltype(v)`. Two `Auto`s constructed from data with the same ratio type
+(e.g. `Vector{Int}` and `Vector{Float64}` both → `Auto{Float64}`) share
+a single concrete type, so `Vector{Auto{Float64}}` is concrete.
+
 ### New: `strategy_kind`
 
 `strategy_kind(s::SearchStrategy)` maps a singleton strategy struct to

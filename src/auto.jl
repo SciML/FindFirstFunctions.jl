@@ -113,6 +113,11 @@ end
 # absent or out of range; `LinearScan` (picked for short `v`) clamps the
 # hint and walks. So `search_last(::Auto, v, x, hint)` is a one-line
 # forward to the kind dispatcher.
+#
+# Special case: when `kind === KIND_UNIFORM_STEP`, we route to the
+# props-aware kernel that uses the precomputed `inv_step` from `props`,
+# skipping the per-query float division in the back-compat AbstractRange
+# `UniformStep` kernel.
 # ---------------------------------------------------------------------------
 
 # Hinted form: forward to the kind dispatcher.
@@ -120,14 +125,22 @@ end
         s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return search_last(s.kind, v, x, hint; order = order)
+    return if s.kind === KIND_UNIFORM_STEP
+        _kernel_last_uniform_step_props(s.props, v, x, order)
+    else
+        search_last(s.kind, v, x, hint; order = order)
+    end
 end
 
 @inline function search_first(
         s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return search_first(s.kind, v, x, hint; order = order)
+    return if s.kind === KIND_UNIFORM_STEP
+        _kernel_first_uniform_step_props(s.props, v, x, order)
+    else
+        search_first(s.kind, v, x, hint; order = order)
+    end
 end
 
 # No-hint form: same forward. The kind's no-hint dispatch handles
@@ -136,14 +149,22 @@ end
         s::Auto, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return search_last(s.kind, v, x; order = order)
+    return if s.kind === KIND_UNIFORM_STEP
+        _kernel_last_uniform_step_props(s.props, v, x, order)
+    else
+        search_last(s.kind, v, x; order = order)
+    end
 end
 
 @inline function search_first(
         s::Auto, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return search_first(s.kind, v, x; order = order)
+    return if s.kind === KIND_UNIFORM_STEP
+        _kernel_first_uniform_step_props(s.props, v, x, order)
+    else
+        search_first(s.kind, v, x; order = order)
+    end
 end
 
 # Legacy `Base.searchsortedlast(::Auto, ...)` shims — same one-liner. Kept
