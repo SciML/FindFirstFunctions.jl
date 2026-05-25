@@ -57,7 +57,7 @@ jobs:
           cat benchmark_table.md
       - name: Post benchmark comment
         if: github.event_name == 'pull_request'
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@v5
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body-path: benchmark_table.md
