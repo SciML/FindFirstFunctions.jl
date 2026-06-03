@@ -21,7 +21,6 @@ concurrency:
 jobs:
   tests:
     name: "${{ matrix.group }} - Julia ${{ matrix.version }} - ${{ matrix.os }}"
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -47,30 +46,10 @@ jobs:
             os: "macos-latest"
           - group: QA
             os: "windows-latest"
-    steps:
-      - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: ${{ matrix.version }}
-      - uses: actions/cache@v5
-        env:
-          cache-name: cache-artifacts
-        with:
-          path: ~/.julia/artifacts
-          key: ${{ runner.os }}-test-${{ env.cache-name }}-${{ hashFiles('**/Project.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-test-${{ env.cache-name }}-
-            ${{ runner.os }}-test-
-            ${{ runner.os }}-
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
-        env:
-          GROUP: ${{ matrix.group }}
-      - uses: julia-actions/julia-processcoverage@v1
-        if: matrix.group == 'Core'
-      - uses: codecov/codecov-action@v6
-        if: matrix.group == 'Core'
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          fail_ci_if_error: false
+    uses: "SciML/.github/.github/workflows/tests.yml@v1"
+    with:
+      group: ${{ matrix.group }}
+      julia-version: ${{ matrix.version }}
+      os: ${{ matrix.os }}
+      coverage: ${{ matrix.group == 'Core' }}
+    secrets: "inherit"
