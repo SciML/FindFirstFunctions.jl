@@ -20,50 +20,7 @@ permissions:
 
 jobs:
   benchmark:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0   # we need both PR head and base branch
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: "1.11"
-      - uses: julia-actions/cache@v3
-      - name: Install AirspeedVelocity
-        run: |
-          julia -e 'using Pkg; Pkg.add(PackageSpec(name="AirspeedVelocity", version="0.6"))'
-      # Resolve commit shas explicitly so AirspeedVelocity sees stable refs.
-      - name: Resolve refs
-        id: resolve
-        run: |
-          PR_SHA=$(git rev-parse HEAD)
-          BASE_SHA=$(git rev-parse origin/${{ github.base_ref }})
-          echo "pr_sha=$PR_SHA"  >> "$GITHUB_OUTPUT"
-          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Run benchmark comparison
-        run: |
-          export JULIA_NUM_THREADS=1
-          ~/.julia/bin/benchpkg FindFirstFunctions \
-            --rev=${{ steps.resolve.outputs.base_sha }},${{ steps.resolve.outputs.pr_sha }} \
-            --bench-on=${{ steps.resolve.outputs.pr_sha }} \
-            --output-dir=results/ \
-            --tune
-      - name: Render comparison table
-        run: |
-          ~/.julia/bin/benchpkgtable FindFirstFunctions \
-            --rev=${{ steps.resolve.outputs.base_sha }},${{ steps.resolve.outputs.pr_sha }} \
-            --input-dir=results/ \
-            > benchmark_table.md
-          cat benchmark_table.md
-      - name: Post benchmark comment
-        if: github.event_name == 'pull_request'
-        uses: peter-evans/create-or-update-comment@v5
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body-path: benchmark_table.md
-          edit-mode: replace
-      - name: Upload raw results
-        uses: actions/upload-artifact@v7
-        with:
-          name: benchmark-results
-          path: results/
+    uses: "SciML/.github/.github/workflows/benchmark.yml@v1"
+    with:
+      julia-version: "1.11"
+    secrets: "inherit"
