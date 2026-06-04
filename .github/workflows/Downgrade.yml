@@ -12,7 +12,6 @@ on:
       - 'docs/**'
 jobs:
   test:
-    if: false  # Disabled: PrecompileTools v1.0.0 (compat lower bound) fails on Julia 1.10. See #58.
     uses: "SciML/.github/.github/workflows/downgrade.yml@v1"
     with:
       julia-version: "1.10"
