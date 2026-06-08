@@ -20,36 +20,5 @@ concurrency:
 
 jobs:
   tests:
-    name: "${{ matrix.group }} - Julia ${{ matrix.version }} - ${{ matrix.os }}"
-    strategy:
-      fail-fast: false
-      matrix:
-        group:
-          - Core
-          - QA
-        version:
-          - "1"
-          - "lts"
-          - "pre"
-        os:
-          - "ubuntu-latest"
-          - "macos-latest"
-          - "windows-latest"
-        exclude:
-          # QA tests only run on Julia 1 (latest stable) - exclude from lts and pre
-          - group: QA
-            version: "lts"
-          - group: QA
-            version: "pre"
-          # QA tests only run on ubuntu
-          - group: QA
-            os: "macos-latest"
-          - group: QA
-            os: "windows-latest"
-    uses: "SciML/.github/.github/workflows/tests.yml@v1"
-    with:
-      group: ${{ matrix.group }}
-      julia-version: ${{ matrix.version }}
-      os: ${{ matrix.os }}
-      coverage: ${{ matrix.group == 'Core' }}
+    uses: "SciML/.github/.github/workflows/grouped-tests.yml@v1"
     secrets: "inherit"
