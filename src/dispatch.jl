@@ -451,6 +451,255 @@ Base.searchsortedfirst(
 ) = searchsortedfirst(BinaryBracket(), v, x; order = order)
 
 # ===========================================================================
+# Strategy: LinearBinarySearch{MAX} — bounded linear walk from the hint with
+# binary fallback. Static MAX type parameter lets the walk be fully unrolled
+# for small MAX (≤ `_LBS_UNROLL_THRESHOLD`) and lets the binary fallback
+# call site specialize per-strategy. The walks themselves are order-aware
+# and use the same `Base.Order.lt` predicate as `LinearScan` so Forward and
+# Reverse orderings share one code path.
+#
+# Unroll threshold = 16: matches the FastInterpolations.jl reference
+# implementation. For MAX ≤ 16 the fully unrolled walk produces flat
+# branchless-ish code that LLVM can fold tightly; for larger MAX the
+# unrolled version balloons (e.g. MAX = 128 → ~256 instructions per walk
+# direction), so we fall back to a bounded while-loop that's still fast
+# but compiles to a fixed code size.
+# ===========================================================================
+
+const _LBS_UNROLL_THRESHOLD = 16
+
+# Walk forward from `i` for up to MAX steps with the `searchsortedlast`
+# polarity. Returns `(idx, found)`: `found = true` means the answer is `idx`,
+# `found = false` means we walked off the end of the window without
+# bracketing `x` and the caller should run a binary fallback on the
+# remaining range.
+#
+# Semantics: `MAX` covers gaps `0..MAX`. The first comparison resolves
+# gap = 0 (hint is already the answer); each subsequent comparison
+# advances one index. After `MAX` advances the walk has tested positions
+# `hint..hint+MAX`. The final `i == hi` check inside the loop catches the
+# "answer is at the array boundary" case without an extra comparison.
+@generated function _lbs_walk_forward_last(
+        v::AbstractVector, x, i::Integer, hi::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        # Initial check: hint itself may be the answer (gap = 0).
+        push!(
+            stmts, quote
+                i == hi && return (hi, true)
+                @inbounds Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+            end,
+        )
+        # MAX advance-then-check pairs: each covers one extra gap unit.
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i += 1
+                    i == hi && return (hi, true)
+                    @inbounds Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            i == hi && return (hi, true)
+            @inbounds Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+            stop = min(hi, i + $MAX)
+            @inbounds while i < stop
+                i += 1
+                i == hi && return (hi, true)
+                Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+            end
+            return (i, false)
+        end
+    end
+end
+
+# Walk backward from `i` for up to MAX steps with the `searchsortedlast`
+# polarity. Returns `(idx, found)`. The hint is known to be past the answer
+# (`v[hint] > x`), so each step retreats and checks "is this index now the
+# answer?". After `MAX` retreats the walk has covered up to `MAX` gaps.
+@generated function _lbs_walk_backward_last(
+        v::AbstractVector, x, i::Integer, lo::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i <= lo && return (lo - 1, true)
+                    i -= 1
+                    @inbounds !Base.Order.lt(order, x, v[i]) && return (i, true)
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            stop = max(lo, i - $MAX)
+            @inbounds while i > stop
+                i -= 1
+                !Base.Order.lt(order, x, v[i]) && return (i, true)
+            end
+            i == lo && !Base.Order.lt(order, x, @inbounds(v[lo])) && return (lo, true)
+            i == lo && return (lo - 1, true)
+            return (i, false)
+        end
+    end
+end
+
+# Companion walks for the `searchsortedfirst` polarity (smallest i with
+# `!lt(order, v[i], x)`). The forward walk advances while `v[i] < x`; the
+# backward walk retreats while `v[i-1] >= x`. Same MAX-covers-MAX-gaps
+# semantics as the `_last` variants.
+@generated function _lbs_walk_forward_first(
+        v::AbstractVector, x, i::Integer, hi::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        # Initial check: hint may already satisfy the meets-or-passes
+        # condition (gap = 0).
+        push!(
+            stmts, quote
+                i > hi && return (hi + 1, true)
+                @inbounds !Base.Order.lt(order, v[i], x) && return (i, true)
+            end,
+        )
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i += 1
+                    i > hi && return (hi + 1, true)
+                    @inbounds !Base.Order.lt(order, v[i], x) && return (i, true)
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            i > hi && return (hi + 1, true)
+            @inbounds !Base.Order.lt(order, v[i], x) && return (i, true)
+            stop = min(hi + 1, i + $MAX)
+            @inbounds while i < stop
+                i += 1
+                i > hi && return (hi + 1, true)
+                !Base.Order.lt(order, v[i], x) && return (i, true)
+            end
+            return (i, false)
+        end
+    end
+end
+
+@generated function _lbs_walk_backward_first(
+        v::AbstractVector, x, i::Integer, lo::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i <= lo && return (lo, true)
+                    @inbounds Base.Order.lt(order, v[i - 1], x) && return (i, true)
+                    i -= 1
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            stop = max(lo, i - $MAX)
+            @inbounds while i > stop
+                Base.Order.lt(order, v[i - 1], x) && return (i, true)
+                i -= 1
+            end
+            i == lo && return (lo, true)
+            return (i, false)
+        end
+    end
+end
+
+function Base.searchsortedlast(
+        ::LinearBinarySearch{MAX}, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward,
+    ) where {MAX}
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo - 1
+    if hint < lo || hint > hi
+        return searchsortedlast(v, x, order)
+    end
+    i = hint % Int
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, x, vi)
+        # Hint is past the answer — walk backward.
+        idx, found = _lbs_walk_backward_last(v, x, i, lo, order, Val(MAX))
+        found && return idx
+        # `idx` is the leftmost index visited by the walk; restrict the
+        # binary fallback to the remaining `[lo, idx]` range.
+        return searchsortedlast(v, x, lo, idx, order)
+    else
+        # Hint is at or before the answer — walk forward.
+        idx, found = _lbs_walk_forward_last(v, x, i, hi, order, Val(MAX))
+        found && return idx
+        return searchsortedlast(v, x, idx, hi, order)
+    end
+end
+
+function Base.searchsortedfirst(
+        ::LinearBinarySearch{MAX}, v::AbstractVector, x, hint::Integer;
+        order::Base.Order.Ordering = Base.Order.Forward,
+    ) where {MAX}
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo
+    if hint < lo || hint > hi
+        return searchsortedfirst(v, x, order)
+    end
+    i = hint % Int
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, vi, x)
+        # Hint is before the answer — walk forward.
+        idx, found = _lbs_walk_forward_first(v, x, i, hi, order, Val(MAX))
+        found && return idx
+        return searchsortedfirst(v, x, idx, hi, order)
+    else
+        # Hint meets-or-passes the answer — walk backward to find the first
+        # occurrence (handles runs of duplicates).
+        idx, found = _lbs_walk_backward_first(v, x, i, lo, order, Val(MAX))
+        found && return idx
+        return searchsortedfirst(v, x, lo, idx, order)
+    end
+end
+
+# No hint → straight binary search (the linear walk has no anchor).
+Base.searchsortedlast(
+    ::LinearBinarySearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedlast(BinaryBracket(), v, x; order = order)
+Base.searchsortedfirst(
+    ::LinearBinarySearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = searchsortedfirst(BinaryBracket(), v, x; order = order)
+
+# ===========================================================================
 # Strategy: InterpolationSearch — extrapolate a guess, then bounded binary
 # search around it.
 # ===========================================================================

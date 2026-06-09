@@ -856,6 +856,201 @@ end
             end
         end
 
+        @safetestset "LinearBinarySearch" begin
+            using FindFirstFunctions, StableRNGs
+
+            @testset "Construction & dispatch on allowed MAX" begin
+                @test LinearBinarySearch() === LinearBinarySearch{8}()
+                @test LinearBinarySearch(0) === LinearBinarySearch{0}()
+                @test LinearBinarySearch(1) === LinearBinarySearch{1}()
+                @test LinearBinarySearch(2) === LinearBinarySearch{2}()
+                @test LinearBinarySearch(4) === LinearBinarySearch{4}()
+                @test LinearBinarySearch(8) === LinearBinarySearch{8}()
+                @test LinearBinarySearch(16) === LinearBinarySearch{16}()
+                @test LinearBinarySearch(32) === LinearBinarySearch{32}()
+                @test LinearBinarySearch(64) === LinearBinarySearch{64}()
+                @test LinearBinarySearch(128) === LinearBinarySearch{128}()
+                @test_throws ArgumentError LinearBinarySearch(3)
+                @test_throws ArgumentError LinearBinarySearch(7)
+                @test_throws ArgumentError LinearBinarySearch(-1)
+                @test LinearBinarySearch <: SearchStrategy
+            end
+
+            @testset "Parity vs Base on Float64, fuzz across MAX" begin
+                rng = StableRNG(8001)
+                for _ in 1:1_000
+                    n = rand(rng, 1:512)
+                    v = sort!(randn(rng, n))
+                    x = (rand(rng) - 0.5) * 6
+                    hint = rand(rng, 1:n)
+                    expected_last = searchsortedlast(v, x)
+                    expected_first = searchsortedfirst(v, x)
+                    for MAX in (0, 1, 2, 4, 8, 16, 32, 64, 128)
+                        strat = LinearBinarySearch(MAX)
+                        @test searchsortedlast(strat, v, x, hint) == expected_last
+                        @test searchsortedfirst(strat, v, x, hint) == expected_first
+                    end
+                end
+            end
+
+            @testset "Parity vs Base on Int64, fuzz across MAX" begin
+                rng = StableRNG(8002)
+                for _ in 1:1_000
+                    n = rand(rng, 1:512)
+                    v = sort!(rand(rng, Int64(-1000):Int64(1000), n))
+                    x = rand(rng, Int64(-1100):Int64(1100))
+                    hint = rand(rng, 1:n)
+                    expected_last = searchsortedlast(v, x)
+                    expected_first = searchsortedfirst(v, x)
+                    for MAX in (0, 4, 8, 16, 32)
+                        strat = LinearBinarySearch(MAX)
+                        @test searchsortedlast(strat, v, x, hint) == expected_last
+                        @test searchsortedfirst(strat, v, x, hint) == expected_first
+                    end
+                end
+            end
+
+            @testset "Reverse ordering parity" begin
+                rng = StableRNG(8003)
+                order = Base.Order.Reverse
+                for _ in 1:500
+                    n = rand(rng, 2:256)
+                    v = sort!(randn(rng, n); rev = true)
+                    x = (rand(rng) - 0.5) * 6
+                    hint = rand(rng, 1:n)
+                    expected_last = searchsortedlast(v, x, order)
+                    expected_first = searchsortedfirst(v, x, order)
+                    for MAX in (0, 1, 4, 8, 16, 32, 64)
+                        strat = LinearBinarySearch(MAX)
+                        @test searchsortedlast(strat, v, x, hint; order = order) ==
+                            expected_last
+                        @test searchsortedfirst(strat, v, x, hint; order = order) ==
+                            expected_first
+                    end
+                end
+            end
+
+            @testset "Hint past the answer — backward walk and fallback" begin
+                v = collect(1:1000)
+                # Answer is index 10; hint deep past it.
+                for MAX in (0, 1, 4, 8, 16, 32, 64, 128)
+                    strat = LinearBinarySearch(MAX)
+                    for hint in (15, 50, 200, 1000)
+                        @test searchsortedlast(strat, v, 10, hint) == 10
+                        @test searchsortedfirst(strat, v, 10, hint) == 10
+                    end
+                end
+            end
+
+            @testset "Hint below the answer — forward walk and fallback" begin
+                v = collect(1:1000)
+                # Answer is index 900; hint deep before it.
+                for MAX in (0, 1, 4, 8, 16, 32, 64, 128)
+                    strat = LinearBinarySearch(MAX)
+                    for hint in (1, 100, 500, 850)
+                        @test searchsortedlast(strat, v, 900, hint) == 900
+                        @test searchsortedfirst(strat, v, 900, hint) == 900
+                    end
+                end
+            end
+
+            @testset "Gap = MAX vs MAX+1 (binary fallback boundary)" begin
+                v = collect(1:10_000)
+                for MAX in (4, 8, 16, 32)
+                    strat = LinearBinarySearch(MAX)
+                    for hint in (1, 1000, 5_000)
+                        # Gap exactly MAX is within the linear walk.
+                        x = hint + MAX
+                        x <= length(v) || continue
+                        @test searchsortedlast(strat, v, x, hint) == x
+                        # Gap MAX + 1 triggers binary fallback.
+                        x2 = hint + MAX + 1
+                        x2 <= length(v) || continue
+                        @test searchsortedlast(strat, v, x2, hint) == x2
+                        # Gap 5*MAX — definitely binary.
+                        x3 = hint + 5 * MAX
+                        x3 <= length(v) || continue
+                        @test searchsortedlast(strat, v, x3, hint) == x3
+                    end
+                end
+            end
+
+            @testset "Edge cases" begin
+                # Empty.
+                ve = Int[]
+                for MAX in (0, 8, 32)
+                    strat = LinearBinarySearch(MAX)
+                    @test searchsortedlast(strat, ve, 5, 1) == 0
+                    @test searchsortedfirst(strat, ve, 5, 1) == 1
+                    @test searchsortedlast(strat, ve, 5) == 0
+                    @test searchsortedfirst(strat, ve, 5) == 1
+                end
+
+                # n = 1.
+                v1 = [42]
+                for MAX in (0, 4, 8)
+                    strat = LinearBinarySearch(MAX)
+                    @test searchsortedlast(strat, v1, 41, 1) == 0
+                    @test searchsortedlast(strat, v1, 42, 1) == 1
+                    @test searchsortedlast(strat, v1, 43, 1) == 1
+                    @test searchsortedfirst(strat, v1, 41, 1) == 1
+                    @test searchsortedfirst(strat, v1, 42, 1) == 1
+                    @test searchsortedfirst(strat, v1, 43, 1) == 2
+                end
+
+                # Hint at firstindex / lastindex.
+                v = collect(1:100)
+                strat = LinearBinarySearch(8)
+                @test searchsortedlast(strat, v, 50, 1) == 50
+                @test searchsortedlast(strat, v, 50, 100) == 50
+                @test searchsortedfirst(strat, v, 50, 1) == 50
+                @test searchsortedfirst(strat, v, 50, 100) == 50
+
+                # hint == answer (zero gap).
+                @test searchsortedlast(strat, v, 7, 7) == 7
+                @test searchsortedfirst(strat, v, 7, 7) == 7
+
+                # Out-of-range hint falls through to plain binary search.
+                for h in (-5, 0, 101, 10_000)
+                    @test searchsortedlast(strat, v, 50, h) == 50
+                    @test searchsortedfirst(strat, v, 50, h) == 50
+                end
+
+                # No-hint dispatch falls through to BinaryBracket.
+                for x in (-5, 0, 1, 50, 100, 101)
+                    @test searchsortedlast(strat, v, x) == searchsortedlast(v, x)
+                    @test searchsortedfirst(strat, v, x) == searchsortedfirst(v, x)
+                end
+            end
+
+            @testset "Duplicates" begin
+                # Runs of duplicates exercise the polarity-aware backward walk
+                # in searchsortedfirst (must find the *first* occurrence).
+                v = [1, 2, 2, 2, 2, 5, 8, 8, 8, 10]
+                for MAX in (0, 1, 4, 8, 16)
+                    strat = LinearBinarySearch(MAX)
+                    for x in (0, 1, 2, 3, 5, 7, 8, 9, 10, 11)
+                        for h in 1:length(v)
+                            @test searchsortedlast(strat, v, x, h) == searchsortedlast(v, x)
+                            @test searchsortedfirst(strat, v, x, h) == searchsortedfirst(v, x)
+                        end
+                    end
+                end
+            end
+
+            @testset "Large n (1M) sanity check" begin
+                v = collect(1:1_000_000)
+                strat = LinearBinarySearch(16)
+                for x in (1, 5, 1_000, 500_000, 999_995, 1_000_000)
+                    for h in (1, 500_000, 1_000_000, x - 1, x + 1)
+                        h = clamp(h, 1, 1_000_000)
+                        @test searchsortedlast(strat, v, x, h) == x
+                        @test searchsortedfirst(strat, v, x, h) == x
+                    end
+                end
+            end
+        end
+
         @safetestset "findequal + BisectThenSIMD" begin
             using FindFirstFunctions, StableRNGs
             F = FindFirstFunctions
