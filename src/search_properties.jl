@@ -71,8 +71,29 @@ const _UNIFORM_REL_TOLERANCE = 1.0e-12
     v::AbstractVector, tol::Float64 = _AUTO_LINEAR_REL_TOLERANCE,
 ) = _sampled_linear_err(v) <= tol
 
-@inline _sampled_looks_uniform(v::AbstractVector) =
-    _sampled_linear_err(v) <= _UNIFORM_REL_TOLERANCE
+# Exact uniformity validation: checks EVERY element against the straight
+# line between the endpoints, not just the 11 sampled points. `is_uniform`
+# gates closed-form O(1) lookups whose answers are silently wrong when the
+# flag is a false positive, so a sampled probe is not enough — data that is
+# uniform at the sampled points but jittered between them must be rejected.
+# Only run when the cheap sampled probe already passed, so the O(n) cost is
+# paid exactly once at construction and only for plausibly-uniform data.
+function _validated_uniform(v::AbstractVector{<:Real})
+    n = length(v)
+    n < 2 && return false
+    @inbounds begin
+        v1, vn = v[1], v[n]
+        span = Float64(vn - v1)
+        (iszero(span) || !isfinite(span)) && return false
+        nm1 = n - 1
+        for i in 2:nm1
+            expected = v1 + (i - 1) / nm1 * span
+            abs(Float64(v[i] - expected)) > _UNIFORM_REL_TOLERANCE * abs(span) &&
+                return false
+        end
+    end
+    return true
+end
 
 # Sampled "log-linear" probe: same 9-point probe as `_sampled_looks_linear`
 # but tests whether `log(v)` is linear in array index. Used to detect
@@ -116,8 +137,9 @@ Run the linearity probe and (for floating-point eltypes) the NaN scan on `v`,
 returning the populated [`SearchProperties{T}`](@ref) where `T` is the data
 ratio type (e.g. `Float64` for `Vector{Int}` or `Vector{Float64}`,
 `Float32` for `Vector{Float32}`). Cost is O(n) on floating-point vectors
-because of the NaN scan; for integer and non-numeric eltypes the cost is
-O(1) — only the sampled-linearity probe runs.
+because of the NaN scan; for integer eltypes the cost is O(1) (only the
+sampled-linearity probe runs) unless the sampled probe flags the data as
+uniform, in which case an exact O(n) validation scan confirms it.
 
 `linear_tolerance` controls the maximum relative deviation accepted by the
 sampled-linearity probe. The default `1e-3` (0.1%) matches `Auto`'s
@@ -145,7 +167,11 @@ function SearchProperties(
     # check. `is_uniform = nothing` (default) means "infer from the
     # probe"; an explicit Bool overrides.
     err = _sampled_linear_err(v)
-    detected_uniform = err <= _UNIFORM_REL_TOLERANCE
+    # The sampled probe is a cheap pre-filter; a positive is confirmed by
+    # an exact full scan because `is_uniform` gates closed-form lookups
+    # that would silently return wrong answers on a false positive. An
+    # explicit caller-supplied Bool skips both probes.
+    detected_uniform = err <= _UNIFORM_REL_TOLERANCE && _validated_uniform(v)
     flag_uniform = is_uniform === nothing ? detected_uniform : is_uniform
     first_val, inv_step = if flag_uniform && length(v) >= 2
         # Closed-form `inv_step` from sampled endpoints. Promotes Int → Float64.

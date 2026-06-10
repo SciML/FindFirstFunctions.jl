@@ -239,15 +239,11 @@ end
                 @test searchsortedfirst(UniformStep(), v, x) == searchsortedfirst(v, x)
             end
 
-            # Auto on AbstractRange short-circuits to the closed-form path —
-            # the answer matches Base's range-aware overload and the call is
-            # near-zero overhead (a small kwarg trampoline shows up under
-            # `@allocated`, but no large heap traffic). The bound was raised
-            # from `< 64` to `<= 64` because `SearchProperties{Float64}` now
-            # carries `first_val::Float64` + `inv_step::Float64`, bumping
-            # `Auto{Float64}` from 16 to 32 bytes — Julia 1.10's kwarg
-            # trampoline allocates exactly 64 bytes for the resulting boxed
-            # NamedTuple (1.11 elides the allocation entirely).
+            # Auto() answers match Base's range-aware overload and the call
+            # is near-zero overhead: no heap traffic beyond Julia 1.10's
+            # kwarg trampoline, which boxes the NamedTuple at exactly 64
+            # bytes for the 32-byte `Auto{Float64}` argument (1.11 elides
+            # the allocation entirely) — hence the `<= 64` bound below.
             r_big = 0.0:0.001:100.0
             @test searchsortedlast(Auto(), r_big, 50.5) == searchsortedlast(r_big, 50.5)
             @test searchsortedfirst(Auto(), r_big, 50.5) ==
@@ -720,6 +716,76 @@ end
             for x in (0.0, 1.7, 5.0, 9.9, 10.0)
                 @test search_last(a_p, 0.0:0.5:10.0, x) ==
                     searchsortedlast(0.0:0.5:10.0, x)
+            end
+
+            # An Auto with KIND_UNIFORM_STEP but the unpopulated sentinel
+            # props (has_props = false, inv_step = 0) must not take the
+            # props-aware closed form — it falls through to the fld-based
+            # range kernel, which stays O(1) and correct.
+            a_sent = Auto(0.0:0.5:10.0, SearchProperties())
+            @test a_sent.kind === KIND_UNIFORM_STEP
+            @test !a_sent.props.has_props
+            for x in (-1.0, 0.0, 1.7, 5.0, 10.0, 11.0)
+                @test search_last(a_sent, 0.0:0.5:10.0, x) ==
+                    searchsortedlast(0.0:0.5:10.0, x)
+                @test search_first(a_sent, 0.0:0.5:10.0, x) ==
+                    searchsortedfirst(0.0:0.5:10.0, x)
+            end
+
+            # Data uniform at the 11 sampled probe points but jittered
+            # between them must NOT be flagged uniform — the exact
+            # validation scan rejects what the sampled pre-filter misses.
+            v_trick = collect(1.0:101.0)
+            v_trick[52:60] .= range(54.5, 60.0, length = 9)
+            @test issorted(v_trick)
+            p_trick = SearchProperties(v_trick)
+            @test !p_trick.is_uniform
+
+            # Even when a caller forces is_uniform = true on such data,
+            # the kernel's correction walk keeps the searchsorted
+            # contract (slower, but never silently wrong).
+            p_forced = SearchProperties(v_trick; is_uniform = true)
+            @test p_forced.is_uniform
+            a_trick = Auto(p_forced)
+            @test a_trick.kind === KIND_UNIFORM_STEP
+            for x in (54.0, 54.5, 55.1875, 0.5, 101.0, 60.0)
+                @test search_last(a_trick, v_trick, x) ==
+                    searchsortedlast(v_trick, x)
+                @test search_first(a_trick, v_trick, x) ==
+                    searchsortedfirst(v_trick, x)
+            end
+
+            # Extreme finite queries: `diff * inv_step` exceeds typemax(Int),
+            # so the kernel must clamp in the float domain before truncating.
+            v_u = collect(0.0:1.0:99.0)
+            a_u = Auto(v_u)
+            @test a_u.kind === KIND_UNIFORM_STEP
+            for x in (1.0e300, -1.0e300, floatmax(Float64), -floatmax(Float64))
+                @test search_last(a_u, v_u, x) == searchsortedlast(v_u, x)
+                @test search_first(a_u, v_u, x) == searchsortedfirst(v_u, x)
+            end
+
+            # Caller-supplied is_uniform = true on a zero-span vector makes
+            # inv_step = Inf and f = NaN at x == first_val; must fall back
+            # rather than hit unsafe_trunc(NaN).
+            c = fill(5.0, 10)
+            p_c = SearchProperties(c; is_uniform = true)
+            a_c = Auto(p_c)
+            for x in (5.0, 4.0, 6.0)
+                @test search_last(a_c, c, x) == searchsortedlast(c, x)
+                @test search_first(a_c, c, x) == searchsortedfirst(c, x)
+            end
+
+            # Reverse-ordered uniform Vector through the props kernel.
+            v_rev = collect(100.0:-1.0:1.0)
+            p_rev = SearchProperties(v_rev)
+            @test p_rev.is_uniform
+            a_vrev = Auto(p_rev)
+            for x in (50.5, 1.0, 100.0, 1.0e300, -3.0)
+                @test search_last(a_vrev, v_rev, x; order = Base.Order.Reverse) ==
+                    searchsortedlast(v_rev, x, Base.Order.Reverse)
+                @test search_first(a_vrev, v_rev, x; order = Base.Order.Reverse) ==
+                    searchsortedfirst(v_rev, x, Base.Order.Reverse)
             end
         end
 

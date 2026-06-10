@@ -98,9 +98,9 @@ end
 
 # `_auto_resolve_kind` is forward-declared in `strategies.jl` so `Auto(v)`
 # can call it from the struct's constructor. The body lives here so it can
-# use the helpers above. Mirrors the v2 `_auto_pick` logic but for
-# *construction-time* resolution — the hint isn't known yet, so we pick a
-# kind that handles every hint configuration robustly.
+# use the helpers above. This is *construction-time* resolution — the hint
+# isn't known yet, so we pick a kind that handles every hint configuration
+# robustly.
 @inline function _auto_resolve_kind(v::AbstractVector, props::SearchProperties)
     if _auto_is_uniform(v, props)
         return KIND_UNIFORM_STEP
@@ -118,10 +118,14 @@ end
 # hint and walks. So `search_last(::Auto, v, x, hint)` is a one-line
 # forward to the kind dispatcher.
 #
-# Special case: when `kind === KIND_UNIFORM_STEP`, we route to the
-# props-aware kernel that uses the precomputed `inv_step` from `props`,
-# skipping the per-query float division in the back-compat AbstractRange
-# `UniformStep` kernel.
+# Special case: when `kind === KIND_UNIFORM_STEP` and `props` is
+# populated, we route to the props-aware kernel that uses the precomputed
+# `inv_step` from `props`, skipping the per-query float division in the
+# back-compat AbstractRange `UniformStep` kernel. An `Auto` holding the
+# sentinel `SearchProperties()` has `inv_step = 0`, which would silently
+# degrade the closed-form guess to a linear walk — the `has_props` guard
+# sends it to the `fld`-based kind kernel instead, matching the guard in
+# the batched path.
 # ---------------------------------------------------------------------------
 
 # Hinted form: forward to the kind dispatcher.
@@ -129,7 +133,7 @@ end
         s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return if s.kind === KIND_UNIFORM_STEP
+    return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_last_uniform_step_props(s.props, v, x, order)
     else
         search_last(s.kind, v, x, hint; order = order)
@@ -140,7 +144,7 @@ end
         s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return if s.kind === KIND_UNIFORM_STEP
+    return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_first_uniform_step_props(s.props, v, x, order)
     else
         search_first(s.kind, v, x, hint; order = order)
@@ -153,7 +157,7 @@ end
         s::Auto, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return if s.kind === KIND_UNIFORM_STEP
+    return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_last_uniform_step_props(s.props, v, x, order)
     else
         search_last(s.kind, v, x; order = order)
@@ -164,7 +168,7 @@ end
         s::Auto, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return if s.kind === KIND_UNIFORM_STEP
+    return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_first_uniform_step_props(s.props, v, x, order)
     else
         search_first(s.kind, v, x; order = order)

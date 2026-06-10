@@ -90,8 +90,17 @@ The struct carries two new fields:
     `(length(v) - 1) / (v[end] - v[1])`.
 
 These fields are populated when `is_uniform = true` and zero otherwise.
-They feed the new **props-aware `UniformStep` kernel** invoked by
-`Auto(v)` when the resolved kind is `KIND_UNIFORM_STEP`:
+
+For `AbstractVector` data, `is_uniform` is detected by the cheap 11-point
+sampled pre-filter and then confirmed by an exact O(n) scan over every
+element. The exact pass matters: data that is uniform at the sampled
+points but jittered between them would otherwise be flagged uniform, and
+the closed-form lookup would land in the wrong cell. The kernels also
+carry a correction walk, so even a caller-forced `is_uniform = true` on
+non-uniform data degrades to a slower search rather than a wrong answer.
+
+The populated fields feed the new **props-aware `UniformStep` kernel**
+invoked by `Auto(v)` when the resolved kind is `KIND_UNIFORM_STEP`:
 
 ```julia
 # v3 closed-form O(1) lookup with no per-query division:

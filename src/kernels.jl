@@ -569,8 +569,8 @@ end
 
 # ===========================================================================
 # Props-aware UniformStep — closed-form O(1) lookup using a precomputed
-# `inv_step` baked into `SearchProperties{T}`. Subsumes the old DirectStep
-# strategy: the per-query float division `fld(diff, step)` is hoisted to
+# `inv_step` baked into `SearchProperties{T}`. The per-query float
+# division `fld(diff, step)` is hoisted to
 # `SearchProperties` construction time, leaving the hot path with one
 # subtract, one multiply, one truncate, plus a bounds clamp and a one-step
 # roundoff correction.
@@ -596,19 +596,27 @@ end
     end
     nm1 = length(v) - 1
     f = diff * props.inv_step
-    i_raw = unsafe_trunc(Int, floor(f))
-    i = if i_raw < 0
+    # Clamp in the float domain before truncating: `f` can exceed
+    # `typemax(Int)` for finite extreme `x`, where `unsafe_trunc` is UB.
+    # `f` is NaN when `diff == 0` and `inv_step == Inf` (caller-supplied
+    # `is_uniform = true` on a zero-span vector).
+    isnan(f) && return _kernel_last_binary_bracket(v, x, order)
+    i = if f < 0
         firstindex(v) - 1
-    elseif i_raw >= nm1
+    elseif f >= nm1
         lastindex(v)
     else
-        firstindex(v) + i_raw
+        firstindex(v) + unsafe_trunc(Int, floor(f))
     end
-    @inbounds if i < lastindex(v) && !Base.Order.lt(order, x, v[i + 1])
-        return i + 1
-    elseif i >= firstindex(v) && i <= lastindex(v) &&
-            Base.Order.lt(order, x, v[i])
-        return i - 1
+    # Walk to the true cell. For exactly-uniform data this takes at most
+    # one step (float roundoff); it also keeps the result correct when
+    # `is_uniform` came from the sampled probe but the data is not
+    # uniform between the sampled points.
+    @inbounds while i < lastindex(v) && !Base.Order.lt(order, x, v[i + 1])
+        i += 1
+    end
+    @inbounds while i >= firstindex(v) && Base.Order.lt(order, x, v[i])
+        i -= 1
     end
     return i
 end
@@ -627,20 +635,19 @@ end
     end
     nm1 = length(v) - 1
     f = diff * props.inv_step
-    i_raw = unsafe_trunc(Int, ceil(f))
-    i = if i_raw <= 0
+    isnan(f) && return _kernel_first_binary_bracket(v, x, order)
+    i = if f <= 0
         firstindex(v)
-    elseif i_raw > nm1
+    elseif f > nm1
         lastindex(v) + 1
     else
-        firstindex(v) + i_raw
+        firstindex(v) + unsafe_trunc(Int, ceil(f))
     end
-    @inbounds if i > firstindex(v) && i <= lastindex(v) + 1 &&
-            !Base.Order.lt(order, v[i - 1], x)
-        return i - 1
+    @inbounds while i > firstindex(v) && !Base.Order.lt(order, v[i - 1], x)
+        i -= 1
     end
-    @inbounds if i <= lastindex(v) && Base.Order.lt(order, v[i], x)
-        return i + 1
+    @inbounds while i <= lastindex(v) && Base.Order.lt(order, v[i], x)
+        i += 1
     end
     return i
 end
