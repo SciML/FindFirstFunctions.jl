@@ -29,9 +29,9 @@ end
     rep = JET.report_call(FindFirstFunctions.findfirstsortedequal, (Int64, Vector{Int64}))
     @test length(JET.get_reports(rep)) == 0
 
-    # bracketstrictlymontonic - bracketing for sorted vectors
+    # bracketstrictlymonotonic - bracketing for sorted vectors
     rep = JET.report_call(
-        FindFirstFunctions.bracketstrictlymontonic,
+        FindFirstFunctions.bracketstrictlymonotonic,
         (Vector{Int64}, Int64, Int64, Base.Order.ForwardOrdering)
     )
     @test length(JET.get_reports(rep)) == 0
@@ -45,17 +45,17 @@ end
     rep = JET.report_call(guesser, (Float64,))
     @test length(JET.get_reports(rep)) == 0
 
-    # searchsortedfirstcorrelated with Integer guess
+    # Strategy-dispatched searchsortedfirst with Integer hint
     rep = JET.report_call(
-        FindFirstFunctions.searchsortedfirstcorrelated,
-        (Vector{Int64}, Int64, Int64)
+        Base.searchsortedfirst,
+        (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
     )
     @test length(JET.get_reports(rep)) == 0
 
-    # searchsortedlastcorrelated with Integer guess
+    # Strategy-dispatched searchsortedlast with Integer hint
     rep = JET.report_call(
-        FindFirstFunctions.searchsortedlastcorrelated,
-        (Vector{Int64}, Int64, Int64)
+        Base.searchsortedlast,
+        (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
     )
     @test length(JET.get_reports(rep)) == 0
 
@@ -66,17 +66,17 @@ end
     )
     @test length(JET.get_reports(rep)) == 0
 
-    # searchsortedfirstvec - vectorized search
+    # searchsortedfirst! - batched in-place search
     rep = JET.report_call(
-        FindFirstFunctions.searchsortedfirstvec,
-        (Vector{Int64}, Vector{Int64})
+        FindFirstFunctions.searchsortedfirst!,
+        (Vector{Int64}, Vector{Int64}, Vector{Int64})
     )
     @test length(JET.get_reports(rep)) == 0
 
-    # searchsortedlastvec - vectorized search
+    # searchsortedlast! - batched in-place search
     rep = JET.report_call(
-        FindFirstFunctions.searchsortedlastvec,
-        (Vector{Int64}, Vector{Int64})
+        FindFirstFunctions.searchsortedlast!,
+        (Vector{Int64}, Vector{Int64}, Vector{Int64})
     )
     @test length(JET.get_reports(rep)) == 0
 end
@@ -98,17 +98,17 @@ end
         @test isempty(allocs)
     end
 
-    @testset "bracketstrictlymontonic" begin
+    @testset "bracketstrictlymonotonic" begin
         # Int64 vector with Forward ordering
         allocs = check_allocs(
-            FindFirstFunctions.bracketstrictlymontonic,
+            FindFirstFunctions.bracketstrictlymonotonic,
             (Vector{Int64}, Int64, Int64, Base.Order.ForwardOrdering)
         )
         @test isempty(allocs)
 
         # Float64 vector with Forward ordering
         allocs = check_allocs(
-            FindFirstFunctions.bracketstrictlymontonic,
+            FindFirstFunctions.bracketstrictlymonotonic,
             (Vector{Float64}, Float64, Int64, Base.Order.ForwardOrdering)
         )
         @test isempty(allocs)
@@ -135,34 +135,34 @@ end
         @test isempty(allocs)
     end
 
-    @testset "searchsortedfirstcorrelated" begin
-        # Int64 vector with integer guess
+    @testset "searchsortedfirst with strategy + hint" begin
+        # Int64 vector with integer hint
         allocs = check_allocs(
-            FindFirstFunctions.searchsortedfirstcorrelated,
-            (Vector{Int64}, Int64, Int64)
+            Base.searchsortedfirst,
+            (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
         )
         @test isempty(allocs)
 
-        # Float64 vector with integer guess
+        # Float64 vector with integer hint
         allocs = check_allocs(
-            FindFirstFunctions.searchsortedfirstcorrelated,
-            (Vector{Float64}, Float64, Int64)
+            Base.searchsortedfirst,
+            (FindFirstFunctions.BracketGallop, Vector{Float64}, Float64, Int64)
         )
         @test isempty(allocs)
     end
 
-    @testset "searchsortedlastcorrelated" begin
-        # Int64 vector with integer guess
+    @testset "searchsortedlast with strategy + hint" begin
+        # Int64 vector with integer hint
         allocs = check_allocs(
-            FindFirstFunctions.searchsortedlastcorrelated,
-            (Vector{Int64}, Int64, Int64)
+            Base.searchsortedlast,
+            (FindFirstFunctions.BracketGallop, Vector{Int64}, Int64, Int64)
         )
         @test isempty(allocs)
 
-        # Float64 vector with integer guess
+        # Float64 vector with integer hint
         allocs = check_allocs(
-            FindFirstFunctions.searchsortedlastcorrelated,
-            (Vector{Float64}, Float64, Int64)
+            Base.searchsortedlast,
+            (FindFirstFunctions.BracketGallop, Vector{Float64}, Float64, Int64)
         )
         @test isempty(allocs)
     end
