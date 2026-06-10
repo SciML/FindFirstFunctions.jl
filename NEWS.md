@@ -22,9 +22,9 @@ search_first(KIND_INTERPOLATION_SEARCH, v, x)
 
 The runtime `if/elseif` over `StrategyKind` values is well-predicted in
 hot loops, the kernel bodies inline, and the return path stays concrete
-(`Int`) regardless of which kind is picked at runtime. The
-`bench/enum_vs_typeparam_dispatch.jl` sweep confirms ~0 ns of overhead
-vs. the v2 multimethod path across 20 representative cells.
+(`Int`) regardless of which kind is picked at runtime. A benchmark sweep
+across 20 representative cells measured ~0 ns of overhead vs. the v2
+multimethod path.
 
 ### What changed at the API level
 
