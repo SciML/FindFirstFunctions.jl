@@ -8,8 +8,8 @@
     SearchStrategy
 
 Abstract supertype for sorted-search strategies. Concrete subtypes select how
-[`searchsortedlast`](@ref Base.searchsortedlast) and
-[`searchsortedfirst`](@ref Base.searchsortedfirst) should be performed when
+`Base.searchsortedlast` and
+`Base.searchsortedfirst` should be performed when
 called with a strategy as the first positional argument:
 
   - [`LinearScan`](@ref) walks ±1 from the hint. Cheapest when the target is
