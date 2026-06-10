@@ -45,11 +45,15 @@ end
     return _findequal_postcheck(v, x, i)
 end
 
-# Enum-tagged form.
+# Enum-tagged form. `KIND_BISECT_THEN_SIMD` forwards to the struct form so
+# the `DenseVector{Int64}` bisect-then-SIMD shortcut is reached — the
+# generic `search_first` path would silently lose it.
 @inline function findequal(
         kind::StrategyKind, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
+    kind === KIND_BISECT_THEN_SIMD &&
+        return findequal(BisectThenSIMD(), v, x; order = order)
     i = search_first(kind, v, x; order = order)
     return _findequal_postcheck(v, x, i)
 end
@@ -58,6 +62,8 @@ end
         kind::StrategyKind, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
+    kind === KIND_BISECT_THEN_SIMD &&
+        return findequal(BisectThenSIMD(), v, x, hint; order = order)
     i = search_first(kind, v, x, hint; order = order)
     return _findequal_postcheck(v, x, i)
 end
