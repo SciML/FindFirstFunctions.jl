@@ -19,17 +19,6 @@ using FindFirstFunctions: Auto, UniformStep, BracketGallop, SearchProperties
 
 const RNG = StableRNG(12345)
 
-function bench_per_query(strategy_or_kind, v, queries)
-    out = Vector{Int}(undef, length(queries))
-    bench = @benchmarkable for k in eachindex($queries)
-        $out[k] = $(
-            strategy_or_kind isa FindFirstFunctions.SearchStrategy ?
-                :(searchsortedlast) : :(FindFirstFunctions.search_last)
-        )($strategy_or_kind, $v, $queries[k])
-    end seconds = 1 evals = 1 samples = 200
-    return run(bench)
-end
-
 # Two-arg form (per-query, no hint), Auto-style:
 function bench_auto(s, v, queries)
     out = Vector{Int}(undef, length(queries))

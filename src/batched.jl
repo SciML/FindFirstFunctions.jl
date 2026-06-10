@@ -203,7 +203,7 @@ function _searchsortedfirst_batched!(
 end
 
 # Dispatch helper: route singleton struct → kind loop, stateful struct →
-# struct loop. Inlining means no extra cost vs. the v2 single-loop form.
+# struct loop. Both inline.
 @inline function _searchsortedlast_sorted_loop_strategy_dispatch!(
         idx_out, v, queries, strategy::SearchStrategy, order,
     )
@@ -346,8 +346,9 @@ function _searchsortedfirst_batched!(
     return _searchsortedfirst_sorted_loop_kind!(idx_out, v, queries, kind, order)
 end
 
-# Batched Auto's kind picker: the v2 decision tree, returning a
-# `StrategyKind` instead of branching to different loop specializations.
+# Batched Auto's kind picker: returns a `StrategyKind` instead of
+# branching to different loop specializations, so the loop is
+# kind-parameterized and type-stable.
 @inline function _auto_batched_kind(
         v::AbstractVector, props::SearchProperties, gap::Integer,
         skewed::Bool, m::Integer,
@@ -384,8 +385,10 @@ under `order`. Equivalent to
 `searchsortedfirst(strategy, v, lo[, hint]; order) :
  searchsortedlast(strategy, v, hi[, hint]; order)`.
 
-When a `hint` is supplied it is used for both endpoint searches.
-Strategies that ignore the hint treat the hinted form as a pass-through.
+When a `hint` is supplied it seeds the `lo` search directly; the `hi`
+search is seeded with `max(first_idx, hint)`, since the upper endpoint
+can never precede the lower one. Strategies that ignore the hint treat
+the hinted form as a pass-through.
 """
 @inline function searchsortedrange(
         strategy::SearchStrategy, v::AbstractVector, lo, hi;

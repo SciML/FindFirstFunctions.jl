@@ -5,13 +5,12 @@
 # entry point: a runtime-tag dispatcher that branches on the enum and
 # inlines into the matching kernel function (defined in `kernels.jl`).
 #
-# The runtime-branch bench (DataInterpolations.jl PR #531) confirmed that
-# an `if/elseif/...` over a `StrategyKind` value is ~0 ns overhead in hot
-# loops because the branch is well-predicted (or eliminated by constant
+# An `if/elseif/...` over a `StrategyKind` value is ~0 ns overhead in hot
+# loops: the branch is well-predicted (or eliminated by constant
 # propagation when the kind is known at the call site), the kernel bodies
-# inline, and the return path stays type-stable — none of the Union-return
-# pathology that the old type-parameter dispatch over `SearchStrategy`
-# subtypes suffered from when the chosen strategy depended on runtime data.
+# inline, and the return path stays a concrete `Int` even when the kind is
+# chosen from runtime data — type-parameter dispatch over `SearchStrategy`
+# subtypes would produce `Union` returns in that situation.
 #
 # Stateful strategies (`GuesserHint(::Guesser)`) do *not* live in the enum.
 # They carry per-instance data, so a singleton tag would lose information.
@@ -66,7 +65,7 @@ own `search_last` method.
 
 This is the preferred entry point for new code. The legacy
 `Base.searchsortedlast(::SearchStrategy, ...)` methods still work for
-back-compat but are deprecated and emit a depwarn on first use.
+back-compat but are deprecated and will be removed in v4.
 """
 @inline function search_last(
         kind::StrategyKind, v::AbstractVector, x;
@@ -229,7 +228,8 @@ end
 """
     strategy_kind(s::SearchStrategy) -> StrategyKind
 
-Map a singleton strategy struct to its enum tag. Stateful strategies
-(`GuesserHint`, `Auto`) do not have a tag and throw `ArgumentError`.
+Map a singleton strategy struct to its enum tag. `Auto` returns its
+stored resolved kind. `GuesserHint` (genuinely stateful, no singleton
+tag) throws `ArgumentError`.
 """
 function strategy_kind end

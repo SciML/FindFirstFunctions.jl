@@ -7,10 +7,6 @@
 # These shims are scheduled for removal in the next major version (v4).
 # New code should call `search_last` / `search_first` with a
 # `StrategyKind` value directly.
-#
-# Each shim emits a `Base.depwarn` once per call site (the `depwarn`
-# infrastructure de-duplicates by `(symbol, file:line)`), encouraging
-# migration to the new API while keeping existing code working.
 
 # `strategy_kind(s)` — the public mapping from strategy struct → tag.
 strategy_kind(::BinaryBracket) = KIND_BINARY_BRACKET
