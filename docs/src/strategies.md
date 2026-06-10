@@ -274,10 +274,10 @@ The per-query `search_last(::Auto, v, x, hint)` is a one-line forward to
 `searchsortedlast!(out, v, queries; strategy = Auto())` re-resolves the
 kind from `(v, queries)` to consult the gap heuristic.
 
-## Equality search
+## Equality routines
 
 The package exposes two `Union{Int, Nothing}`-returning equality routines —
 [`findfirstequal`](@ref FindFirstFunctions.findfirstequal) (unsorted SIMD
 scan) and [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal)
-(sorted bisect-then-SIMD scan). See the [Equality search](@ref) page for
+(sorted bisect-then-SIMD scan). See the [Equality search](@ref Equality-search) page for
 the full documentation.
