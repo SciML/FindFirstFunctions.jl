@@ -44,7 +44,7 @@ FindFirstFunctions.findfirstsortedequal
 Both equality functions are backed by the same SIMD-equality LLVM IR
 scaffolding used internally throughout the package (`load <8 x i64>`,
 `icmp eq`, `cttz` on the bitmask of the 8-wide compare). The IR template
-[`FindFirstFunctions._simd_scan_ir`](@ref) generates this for the equality
+`FindFirstFunctions._simd_scan_ir` (internal) generates this for the equality
 predicate; the same template generates the `>` / `>=` variants for
 [`SIMDLinearScan`](@ref FindFirstFunctions.SIMDLinearScan).
 

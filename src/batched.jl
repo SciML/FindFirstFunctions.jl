@@ -7,7 +7,7 @@
     searchsortedlast!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward,
                        queries_sorted = nothing)
 
-In-place batched [`searchsortedlast`](@ref Base.searchsortedlast). Writes one
+In-place batched `Base.searchsortedlast`. Writes one
 index per element of `queries` into `idx_out` (which must be the same length).
 
 If `queries` is sorted under `order`, the previous result is used as a hint for
@@ -57,7 +57,7 @@ end
     searchsortedfirst!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward,
                         queries_sorted = nothing)
 
-In-place batched [`searchsortedfirst`](@ref Base.searchsortedfirst). See
+In-place batched `Base.searchsortedfirst`. See
 [`searchsortedlast!`](@ref) for behavior and for the `queries_sorted` kwarg.
 """
 function searchsortedfirst!(

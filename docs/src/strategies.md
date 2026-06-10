@@ -235,12 +235,12 @@ any hint that is supplied.
 See [Auto: heuristics and benchmarks](@ref) for the full decision tree and
 the benchmark sweep that produced its crossover constants.
 
-## Equality search
+## Equality routines
 
 The package exposes two `Union{Int, Nothing}`-returning equality routines —
 [`findfirstequal`](@ref FindFirstFunctions.findfirstequal) (unsorted SIMD
 scan) and [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal)
 (sorted bisect-then-SIMD scan). They live outside the strategy framework
 because their return semantics differ (`nothing` on miss, vs. in-range
-index for the positional API). See the [Equality search](@ref) page for the
+index for the positional API). See the [Equality search](@ref Equality-search) page for the
 full documentation.

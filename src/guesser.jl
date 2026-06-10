@@ -32,8 +32,8 @@ correlated lookup by either
   - using the previous outcome (the cached `idx_prev`).
 
 Pass a `Guesser` to [`GuesserHint`](@ref) to use it as a search strategy with
-the dispatched [`searchsortedlast`](@ref Base.searchsortedlast) /
-[`searchsortedfirst`](@ref Base.searchsortedfirst) API.
+the dispatched `Base.searchsortedlast` /
+`Base.searchsortedfirst` API.
 """
 struct Guesser{T <: AbstractVector}
     v::T

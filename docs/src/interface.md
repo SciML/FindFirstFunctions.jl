@@ -28,6 +28,7 @@ compose with existing `Base.Order` orderings.
 ```@docs
 FindFirstFunctions.searchsortedfirst!
 FindFirstFunctions.searchsortedlast!
+FindFirstFunctions.searchsortedrange
 ```
 
 ## Rules of the interface
