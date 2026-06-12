@@ -63,9 +63,9 @@ kernel. When the first argument is a stateful strategy wrapper (`Auto`,
 `GuesserHint`) the call dispatches via multimethod into that wrapper's
 own `search_last` method.
 
-This is the preferred entry point for new code. The legacy
-`Base.searchsortedlast(::SearchStrategy, ...)` methods still work for
-back-compat but are deprecated and will be removed in v4.
+This is the only search entry point: as of v3, FindFirstFunctions no
+longer extends `Base.searchsortedlast` / `Base.searchsortedfirst` with
+strategy methods.
 """
 @inline function search_last(
         kind::StrategyKind, v::AbstractVector, x;
@@ -220,9 +220,9 @@ end
 end
 
 # ---------------------------------------------------------------------------
-# Per-strategy kind lookup. Used by the deprecation shims in
-# `legacy_dispatch.jl` and by callers that need to convert a strategy
-# struct to its enum tag.
+# Per-strategy kind lookup. Methods live in `strategy_kind.jl`; used by
+# the struct-valued `search_last` / `search_first` entry points and by
+# callers that need to convert a strategy struct to its enum tag.
 # ---------------------------------------------------------------------------
 
 """

@@ -10,17 +10,20 @@ ways to select a strategy:
     value per singleton strategy; runtime `if/elseif` dispatch into the
     matching kernel; ~0 ns of overhead in hot loops; the inferred return
     type is concrete regardless of which kind is picked at runtime.
-  - **v2 back-compat:** pass a singleton strategy struct (e.g.
-    `BracketGallop()`) to `Base.searchsortedlast` / `Base.searchsortedfirst`.
-    Each method is a one-line shim that forwards to `search_last(KIND_X, ...)`.
-    Scheduled for removal in v4 — migrate to `search_last` /
-    `search_first` for new code.
+  - **Struct form:** pass a singleton strategy struct (e.g.
+    `BracketGallop()`) to the same `search_last` / `search_first`. The
+    struct forwards through
+    [`strategy_kind`](@ref FindFirstFunctions.strategy_kind), which
+    constant-folds for a literal strategy argument — the struct form
+    costs nothing over the kind form.
+
+FindFirstFunctions does **not** extend `Base.searchsortedlast` /
+`Base.searchsortedfirst` (the v2 API; removed in v3).
 
 The stateful strategies — [`Auto`](@ref FindFirstFunctions.Auto) and
 [`GuesserHint`](@ref FindFirstFunctions.GuesserHint) — carry per-instance
 data and so cannot be expressed as singleton enum tags. They dispatch
-via their own multimethods (and via the back-compat `Base.searchsortedlast(::S, ...)`
-shim).
+via their own multimethods.
 
 ```@docs
 FindFirstFunctions.SearchStrategy
@@ -81,41 +84,36 @@ All hint-consuming strategies fall back to `BinaryBracket` when no hint is
 supplied or when the hint is out of range. `InterpolationSearch` additionally
 falls back to `BinaryBracket` for non-numeric element types.
 
-## Migrating from v2 (`Base.searchsortedlast(::S, ...)`) to v3 (`search_last(KIND_X, ...)`)
+## Migrating from v2 (`Base.searchsortedlast(::S, ...)`) to v3
 
-The v2 API is preserved as a back-compat shim. To migrate to the v3
-preferred form, change each call site as follows:
+The v2 `Base.searchsortedlast(::S, ...)` / `Base.searchsortedfirst(::S, ...)`
+methods are removed in v3. The migration is a mechanical rename —
+`searchsortedlast` → `search_last`, `searchsortedfirst` → `search_first` —
+with the strategy argument unchanged:
 
 ```julia
-# v2 (still works, shim forwards to v3)
+# v2 (removed)
 searchsortedlast(BracketGallop(), v, x, hint)
 searchsortedfirst(InterpolationSearch(), v, x)
-
-# v3 (preferred)
-search_last(KIND_BRACKET_GALLOP, v, x, hint)
-search_first(KIND_INTERPOLATION_SEARCH, v, x)
-```
-
-Stateful strategies (`Auto`, `GuesserHint`) have both forms:
-
-```julia
-# v2 form (still works)
 searchsortedlast(Auto(v), v, x, hint)
 searchsortedfirst(GuesserHint(g), v, x)
 
-# v3 form (preferred)
+# v3
+search_last(BracketGallop(), v, x, hint)
+search_first(InterpolationSearch(), v, x)
 search_last(Auto(v), v, x, hint)
 search_first(GuesserHint(g), v, x)
 ```
 
-The migration is mechanical: rename `searchsortedlast` → `search_last`,
-`searchsortedfirst` → `search_first`, and wrap singleton struct
-strategies with their `KIND_X` tag (no rename needed for stateful
-strategies).
+Hot loops that pick the strategy from runtime data should use the
+`StrategyKind` enum form (`search_last(KIND_BRACKET_GALLOP, v, x, hint)`);
+for a literal singleton strategy the struct form compiles to exactly the
+same code.
 
-The v2 shims will be removed in **v4** (no scheduled date — long enough
-for downstream packages like DataInterpolations.jl, ModelingToolkit, and
-NonlinearSolve to migrate).
+The batched API (`searchsortedlast!`, `searchsortedfirst!`,
+`searchsortedrange`) and the equality API (`findequal`,
+`findfirstequal`, `findfirstsortedequal`) are FFF-owned names and are
+unchanged.
 
 ## Reference
 

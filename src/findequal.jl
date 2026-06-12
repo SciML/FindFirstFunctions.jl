@@ -18,9 +18,8 @@ sentinel matches the convention `Base.searchsortedlast` already uses for
 The `strategy` argument can be:
 
   - A singleton strategy struct (`BinaryBracket()`, `BracketGallop()`,
-    …) — back-compat with the v2 API.
-  - A [`StrategyKind`](@ref) enum value (`KIND_BRACKET_GALLOP`, …) — the
-    v3 preferred form.
+    …) — forwards through the struct → kind mapping.
+  - A [`StrategyKind`](@ref) enum value (`KIND_BRACKET_GALLOP`, …).
   - A stateful strategy (`Auto`, `GuesserHint`) — dispatched via
     multimethod.
 
@@ -41,7 +40,7 @@ end
         strategy::SearchStrategy, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    i = searchsortedfirst(strategy, v, x, hint; order = order)
+    i = search_first(strategy, v, x, hint; order = order)
     return _findequal_postcheck(v, x, i)
 end
 
@@ -69,7 +68,7 @@ end
 end
 
 @inline function _findequal_generic_strategy(strategy, v, x, order)
-    i = searchsortedfirst(strategy, v, x; order = order)
+    i = search_first(strategy, v, x; order = order)
     return _findequal_postcheck(v, x, i)
 end
 

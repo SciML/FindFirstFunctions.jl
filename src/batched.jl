@@ -110,7 +110,7 @@ function _searchsortedfirst_sorted_loop_kind!(
 end
 
 # Sorted inner loop parameterized on a strategy *struct* (for GuesserHint
-# and for the back-compat `Base.searchsortedlast(::S, ...)` path).
+# and for the struct-valued `search_last(::S, ...)` path).
 function _searchsortedlast_sorted_loop!(
         idx_out, v::AbstractVector, queries::AbstractVector,
         strategy::SearchStrategy, order::Base.Order.Ordering,
@@ -119,9 +119,9 @@ function _searchsortedlast_sorted_loop!(
     @inbounds for k in eachindex(queries)
         q = queries[k]
         hint = if hint < firstindex(v)
-            searchsortedlast(strategy, v, q; order = order)
+            search_last(strategy, v, q; order = order)
         else
-            searchsortedlast(strategy, v, q, hint; order = order)
+            search_last(strategy, v, q, hint; order = order)
         end
         idx_out[k] = hint
     end
@@ -136,9 +136,9 @@ function _searchsortedfirst_sorted_loop!(
     @inbounds for k in eachindex(queries)
         q = queries[k]
         hint = if hint < firstindex(v)
-            searchsortedfirst(strategy, v, q; order = order)
+            search_first(strategy, v, q; order = order)
         else
-            searchsortedfirst(strategy, v, q, hint; order = order)
+            search_first(strategy, v, q, hint; order = order)
         end
         idx_out[k] = hint
     end
@@ -382,8 +382,8 @@ end
 
 Return the index range of all entries `v[i]` satisfying `lo ≤ v[i] ≤ hi`
 under `order`. Equivalent to
-`searchsortedfirst(strategy, v, lo[, hint]; order) :
- searchsortedlast(strategy, v, hi[, hint]; order)`.
+`search_first(strategy, v, lo[, hint]; order) :
+ search_last(strategy, v, hi[, hint]; order)`.
 
 When a `hint` is supplied it seeds the `lo` search directly; the `hi`
 search is seeded with `max(first_idx, hint)`, since the upper endpoint
@@ -394,8 +394,8 @@ the hinted form as a pass-through.
         strategy::SearchStrategy, v::AbstractVector, lo, hi;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    first_idx = searchsortedfirst(strategy, v, lo; order = order)
-    last_idx = searchsortedlast(strategy, v, hi; order = order)
+    first_idx = search_first(strategy, v, lo; order = order)
+    last_idx = search_last(strategy, v, hi; order = order)
     return first_idx:last_idx
 end
 
@@ -403,8 +403,8 @@ end
         strategy::SearchStrategy, v::AbstractVector, lo, hi, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    first_idx = searchsortedfirst(strategy, v, lo, hint; order = order)
-    last_idx = searchsortedlast(
+    first_idx = search_first(strategy, v, lo, hint; order = order)
+    last_idx = search_last(
         strategy, v, hi, max(first_idx, hint); order = order
     )
     return first_idx:last_idx

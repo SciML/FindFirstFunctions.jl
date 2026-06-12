@@ -10,7 +10,7 @@
 #     `_estimate_avg_gap`, `_auto_interp_eligible`, …)
 #   - `_auto_resolve_kind(v, props)` — forward-declared in `strategies.jl`
 #   - The per-query `search_last(::Auto, ...)` / `search_first(::Auto, ...)`
-#     methods + their `Base.searchsortedlast(::Auto, ...)` back-compat shims.
+#     methods.
 
 # Per-query Auto threshold: under this length, the bracket-search bookkeeping
 # costs more than a worst-case linear walk.
@@ -121,7 +121,7 @@ end
 # Special case: when `kind === KIND_UNIFORM_STEP` and `props` is
 # populated, we route to the props-aware kernel that uses the precomputed
 # `inv_step` from `props`, skipping the per-query float division in the
-# back-compat AbstractRange `UniformStep` kernel. An `Auto` holding the
+# plain (`fld`-based) `UniformStep` kernel. An `Auto` holding the
 # sentinel `SearchProperties()` has `inv_step = 0`, which would silently
 # degrade the closed-form guess to a linear walk — the `has_props` guard
 # sends it to the `fld`-based kind kernel instead, matching the guard in
@@ -174,22 +174,3 @@ end
         search_first(s.kind, v, x; order = order)
     end
 end
-
-# Legacy `Base.searchsortedlast(::Auto, ...)` shims — same one-liner. Kept
-# so v2 callers continue to work without changes.
-Base.searchsortedlast(
-    s::Auto, v::AbstractVector, x;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(s, v, x; order = order)
-Base.searchsortedfirst(
-    s::Auto, v::AbstractVector, x;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(s, v, x; order = order)
-Base.searchsortedlast(
-    s::Auto, v::AbstractVector, x, hint::Integer;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(s, v, x, hint; order = order)
-Base.searchsortedfirst(
-    s::Auto, v::AbstractVector, x, hint::Integer;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(s, v, x, hint; order = order)

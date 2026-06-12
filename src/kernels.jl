@@ -2,10 +2,9 @@
 # function that performs the strategy's algorithm directly — no method
 # dispatch, no Union returns, no wrapper struct.
 #
-# The kernels are called from the enum dispatcher in `kinds.jl` and from
-# the legacy `Base.searchsortedlast(::S, ...)` shims in `legacy_dispatch.jl`.
-# `Auto` and `GuesserHint` also call them (directly, by kind, for `Auto`;
-# via the kind dispatcher, for `GuesserHint`).
+# The kernels are called from the enum dispatcher in `kinds.jl`. `Auto`
+# and `GuesserHint` also call them (directly, by kind, for `Auto`; via
+# the kind dispatcher, for `GuesserHint`).
 
 # ===========================================================================
 # Bracket helpers — backing `BracketGallop`

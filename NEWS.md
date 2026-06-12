@@ -26,29 +26,29 @@ hot loops, the kernel bodies inline, and the return path stays concrete
 across 20 representative cells measured ~0 ns of overhead vs. the v2
 multimethod path.
 
-### What changed at the API level
+### Breaking: the `Base.searchsortedlast(::S, ...)` API is removed
 
-| v2 | v3 (preferred) | v3 back-compat (shim, removed in v4) |
-|---|---|---|
-| `searchsortedlast(BracketGallop(), v, x, hint)` | `search_last(KIND_BRACKET_GALLOP, v, x, hint)` | `searchsortedlast(BracketGallop(), v, x, hint)` still works |
-| `searchsortedfirst(InterpolationSearch(), v, x)` | `search_first(KIND_INTERPOLATION_SEARCH, v, x)` | `searchsortedfirst(InterpolationSearch(), v, x)` still works |
-| `searchsortedlast(LinearScan(), v, x, hint)` | `search_last(KIND_LINEAR_SCAN, v, x, hint)` | `searchsortedlast(LinearScan(), v, x, hint)` still works |
-| `searchsortedlast(BinaryBracket(), v, x)` | `search_last(KIND_BINARY_BRACKET, v, x)` | `searchsortedlast(BinaryBracket(), v, x)` still works |
-| `searchsortedlast(UniformStep(), r, x)` | `search_last(KIND_UNIFORM_STEP, r, x)` | `searchsortedlast(UniformStep(), r, x)` still works |
-| `searchsortedlast(SIMDLinearScan(), v, x, hint)` | `search_last(KIND_SIMD_LINEAR_SCAN, v, x, hint)` | `searchsortedlast(SIMDLinearScan(), v, x, hint)` still works |
-| `searchsortedlast(ExpFromLeft(), v, x, hint)` | `search_last(KIND_EXP_FROM_LEFT, v, x, hint)` | `searchsortedlast(ExpFromLeft(), v, x, hint)` still works |
-| `searchsortedlast(BitInterpolationSearch(), v, x)` | `search_last(KIND_BIT_INTERPOLATION_SEARCH, v, x)` | `searchsortedlast(BitInterpolationSearch(), v, x)` still works |
-| `findequal(BisectThenSIMD(), v, x)` | `findequal(KIND_BISECT_THEN_SIMD, v, x)` | `findequal(BisectThenSIMD(), v, x)` still works |
+v3 no longer extends `Base.searchsortedlast` / `Base.searchsortedfirst`
+with strategy methods. The FFF-owned `search_last` / `search_first`
+dispatchers are the only search entry points; they accept a
+`StrategyKind` tag, a strategy struct (which forwards through
+[`strategy_kind`] and constant-folds for literal strategies), or a
+stateful strategy (`Auto`, `GuesserHint`):
+
+| v2 (removed) | v3 |
+|---|---|
+| `searchsortedlast(BracketGallop(), v, x, hint)` | `search_last(KIND_BRACKET_GALLOP, v, x, hint)` or `search_last(BracketGallop(), v, x, hint)` |
+| `searchsortedfirst(InterpolationSearch(), v, x)` | `search_first(KIND_INTERPOLATION_SEARCH, v, x)` or `search_first(InterpolationSearch(), v, x)` |
+| `searchsortedlast(UniformStep(), r, x)` | `search_last(KIND_UNIFORM_STEP, r, x)` or `search_last(UniformStep(), r, x)` |
+| `searchsortedlast(Auto(v), v, x, hint)` | `search_last(Auto(v), v, x, hint)` |
+| `searchsortedfirst(GuesserHint(g), v, x)` | `search_first(GuesserHint(g), v, x)` |
+
+(The same rename applies to every other singleton strategy.) The batched
+in-place API (`searchsortedlast!` / `searchsortedfirst!` /
+`searchsortedrange`) is FFF-owned and unchanged.
 
 Stateful strategies (`Auto`, `GuesserHint`) stay on the multimethod path
-because they carry per-instance data:
-
-```julia
-search_last(Auto(v), v, x, hint)            # v3 preferred
-searchsortedlast(Auto(v), v, x, hint)       # v3 back-compat (shim)
-search_first(GuesserHint(g), v, x)          # v3 preferred
-searchsortedfirst(GuesserHint(g), v, x)     # v3 back-compat (shim)
-```
+because they carry per-instance data.
 
 ### Breaking changes — `Auto` resolves at construction
 
@@ -139,18 +139,10 @@ findequal(KIND_BRACKET_GALLOP, v, x)
 findequal(KIND_BRACKET_GALLOP, v, x, hint)
 ```
 
-In addition to the v2 `findequal(strategy_struct, v, x[, hint])` form
-(which still works via the shim).
+In addition to the `findequal(strategy_struct, v, x[, hint])` form,
+which forwards through the same struct → kind mapping.
 
-### Deprecation timeline
-
-The v2 `Base.searchsortedlast(::S, ...)` /
-`Base.searchsortedfirst(::S, ...)` methods for singleton strategy
-structs are scheduled for removal in v4. They emit no depwarn in v3
-because the noise would be unmanageable across the ecosystem; the
-removal will be announced at least one minor cycle in advance.
-
-### Internals — `dispatch.jl` split into `kinds.jl` + `kernels.jl` + `legacy_dispatch.jl`
+### Internals — `dispatch.jl` split into `kinds.jl` + `kernels.jl` + `strategy_kind.jl`
 
 The v2 `src/dispatch.jl` file (Base.searchsortedlast extensions per
 strategy) is gone. In its place:
@@ -160,11 +152,9 @@ strategy) is gone. In its place:
   - `src/kernels.jl` — per-strategy kernel functions
     (`_kernel_last_bracket_gallop`, etc.), lifted out of the v2 method
     bodies.
-  - `src/legacy_dispatch.jl` — `Base.searchsortedlast(::S, ...)` shims
-    that forward to `search_last(KIND_X, ...)` (one shim per singleton
-    strategy struct).
-
-The `strategy_kind(s)` mapping function is defined alongside the shims.
+  - `src/strategy_kind.jl` — the struct → kind mapping plus the
+    struct-valued `search_last(::S, ...)` / `search_first(::S, ...)`
+    entry points that forward through it.
 
 ## 2.0.0
 

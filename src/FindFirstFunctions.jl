@@ -5,12 +5,13 @@ module FindFirstFunctions
 # small isbits payloads), so exporting them only adds names to the
 # caller's namespace — no runtime cost.
 #
-# v3 introduces the enum-tagged dispatch path (`search_last` /
-# `search_first` over `StrategyKind` values). The v2
-# `Base.searchsortedlast(::S, ...)` API remains as a back-compat shim,
-# scheduled for removal in v4.
+# v3 replaces the v2 `Base.searchsortedlast(::S, ...)` extensions with
+# the FFF-owned `search_last` / `search_first` dispatchers, which accept
+# a `StrategyKind` tag, a strategy struct, or a stateful strategy
+# (`Auto`, `GuesserHint`). FFF no longer extends `Base.searchsortedlast`
+# or `Base.searchsortedfirst`.
 export
-    # Abstract type + concrete singleton strategies (v2 back-compat).
+    # Abstract type + concrete singleton strategies (friendly strategy values).
     SearchStrategy,
     LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
     InterpolationSearch, BitInterpolationSearch,
@@ -43,7 +44,7 @@ include("kinds.jl")               # StrategyKind enum + search_last / search_fir
 include("strategies.jl")          # SearchStrategy + concrete strategy types + SearchProperties + Auto
 include("search_properties.jl")   # Linearity / NaN probes + populated SearchProperties constructor
 include("kernels.jl")             # Per-strategy kernel functions called by the dispatchers
-include("legacy_dispatch.jl")     # Base.searchsortedlast(::S,…) back-compat shims + strategy_kind
+include("strategy_kind.jl")       # strategy struct → kind mapping + struct-valued search entry points
 include("auto.jl")                # Auto helpers + _auto_resolve_kind + Auto dispatch
 include("batched.jl")             # Batched API + Auto batched specialization
 include("guesser.jl")             # looks_linear + Guesser + GuesserHint dispatch

@@ -96,21 +96,3 @@ end
     s::GuesserHint, v::AbstractVector, x, ::Integer;
     order::Base.Order.Ordering = Base.Order.Forward,
 ) = search_first(s, v, x; order = order)
-
-# `Base.searchsortedlast(::GuesserHint, ...)` shims for back-compat.
-Base.searchsortedlast(
-    s::GuesserHint, v::AbstractVector, x;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(s, v, x; order = order)
-Base.searchsortedfirst(
-    s::GuesserHint, v::AbstractVector, x;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(s, v, x; order = order)
-Base.searchsortedlast(
-    s::GuesserHint, v::AbstractVector, x, hint::Integer;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(s, v, x, hint; order = order)
-Base.searchsortedfirst(
-    s::GuesserHint, v::AbstractVector, x, hint::Integer;
-    order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(s, v, x, hint; order = order)

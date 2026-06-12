@@ -1,9 +1,10 @@
 # Sorted-search strategy type hierarchy. The singleton strategy structs
-# (`LinearScan`, `BracketGallop`, …) exist for back-compat with v2's
-# `Base.searchsortedlast(::S, ...)` API; the v3 preferred path is to call
-# the enum-tagged `search_last` / `search_first` directly (see `kinds.jl`).
-# The stateful strategies — `Auto` and `GuesserHint` — stay on the
-# multimethod path because they carry per-instance data.
+# (`LinearScan`, `BracketGallop`, …) are friendly names for the
+# `StrategyKind` tags — passing one to `search_last` / `search_first`
+# forwards through `strategy_kind` and constant-folds (see
+# `strategy_kind.jl`). The stateful strategies — `Auto` and
+# `GuesserHint` — stay on the multimethod path because they carry
+# per-instance data.
 
 """
     SearchStrategy
@@ -17,12 +18,11 @@ concrete subtype:
     `BisectThenSIMD`) are zero-field structs. Each one has a matching
     `StrategyKind` enum value, and the v3 preferred entry point is
     [`search_last`](@ref) / [`search_first`](@ref) with that enum tag.
-    The `Base.searchsortedlast(::S, ...)` API still works as a v2
-    back-compat shim.
+    The struct itself can also be passed to `search_last` /
+    `search_first` directly; it forwards through [`strategy_kind`](@ref).
   - **Stateful strategies** (`Auto`, `GuesserHint`) carry per-instance
     data. They dispatch via their own `search_last` / `search_first`
-    multimethods (and via `Base.searchsortedlast(::S, ...)` for
-    back-compat).
+    multimethods.
 
 Strategies can also be passed to the batched
 [`searchsortedlast!`](@ref) / [`searchsortedfirst!`](@ref) APIs.
@@ -238,8 +238,7 @@ Stateful strategy that resolves to a concrete [`StrategyKind`](@ref) at
 construction time. The resolution uses static information available at
 construction: `props` (if supplied) plus `v` (if supplied).
 
-**Per-query** (`search_last(Auto(), v, x[, hint])` or the legacy
-`searchsortedlast(Auto(), v, x[, hint])`): forwards directly to the
+**Per-query** (`search_last(Auto(), v, x[, hint])`): forwards directly to the
 stored kind. `Auto()` defaults to `KIND_BINARY_BRACKET` (safe choice
 when nothing is known about `v`); `Auto(v)` resolves to a faster kind
 based on `length(v)`, `props.is_uniform`, etc. Callers that want the
