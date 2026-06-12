@@ -6,24 +6,30 @@ must satisfy.
 
 ## Public API surface
 
-In 2.x the sorted-search public API is a single pair of generic functions
-overloaded on a strategy as the first positional argument:
+The sorted-search public API is the pair of FFF-owned generic functions
+dispatched on a strategy as the first positional argument:
 
 ```julia
-searchsortedfirst(strategy, v, x[, hint]; order = Base.Order.Forward)
-searchsortedlast(strategy, v, x[, hint]; order = Base.Order.Forward)
+search_first(strategy, v, x[, hint]; order = Base.Order.Forward)
+search_last(strategy, v, x[, hint]; order = Base.Order.Forward)
 ```
 
-and the in-place batched variants:
+`strategy` is a [`StrategyKind`](@ref FindFirstFunctions.StrategyKind) enum
+value (`KIND_BRACKET_GALLOP`, …), a singleton strategy struct
+(`BracketGallop()`, … — forwards through
+[`strategy_kind`](@ref FindFirstFunctions.strategy_kind) and constant-folds
+for a literal argument), or a stateful strategy (`Auto`, `GuesserHint`).
+
+The in-place batched variants:
 
 ```julia
 searchsortedfirst!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward)
 searchsortedlast!(idx_out, v, queries; strategy = Auto(), order = Base.Order.Forward)
 ```
 
-The strategy types live in the `FindFirstFunctions` module; the
-`searchsortedfirst`/`searchsortedlast` names are extended from `Base` so they
-compose with existing `Base.Order` orderings.
+FindFirstFunctions does not extend `Base.searchsortedfirst` /
+`Base.searchsortedlast` — all strategy dispatch happens through the
+FFF-owned names above, which compose with the same `Base.Order` orderings.
 
 ```@docs
 FindFirstFunctions.searchsortedfirst!
@@ -40,8 +46,10 @@ FindFirstFunctions.searchsortedrange
      ([`InterpolationSearch`](@ref FindFirstFunctions.InterpolationSearch),
      [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket)).
   2. **Strategies are singletons or wrappers.** `LinearScan`, `BracketGallop`,
-     `ExpFromLeft`, `InterpolationSearch`, `BinaryBracket`, and `Auto` are
-     zero-field singletons.
+     `ExpFromLeft`, `InterpolationSearch`, and `BinaryBracket` are
+     zero-field singletons mapped to their `StrategyKind` tag by
+     `strategy_kind`. [`Auto`](@ref FindFirstFunctions.Auto) carries a
+     resolved kind plus a `SearchProperties` payload;
      [`GuesserHint`](@ref FindFirstFunctions.GuesserHint) is a thin wrapper
      around a [`Guesser`](@ref FindFirstFunctions.Guesser). New strategies
      should follow the same pattern: parameters that change *behaviour*
@@ -63,17 +71,28 @@ FindFirstFunctions.searchsortedrange
 
 ## Anatomy of a strategy
 
-A built-in strategy provides up to four methods on each of
-`Base.searchsortedfirst` / `Base.searchsortedlast`:
+A built-in singleton strategy consists of a `StrategyKind` enum value, a
+pair of kernel functions (`_kernel_last_<name>` / `_kernel_first_<name>` in
+`src/kernels.jl`), and branches in the four dispatch switches in
+`src/kinds.jl` (hinted/unhinted × last/first). The "no hint" branch of a
+hint-using strategy falls back to `BinaryBracket`; the hinted branch of a
+hint-ignoring strategy discards the hint.
+
+A custom strategy defined outside the package cannot add an enum value
+(the enum is closed), so it provides its own `search_last` / `search_first`
+methods instead — these are more specific than the generic
+`SearchStrategy` fallback and take precedence:
 
 ```julia
 # Required: the hinted form (the strategy's reason for existing).
-Base.searchsortedlast(::MyStrategy, v, x, hint::Integer; order) = ...
-Base.searchsortedfirst(::MyStrategy, v, x, hint::Integer; order) = ...
+FindFirstFunctions.search_last(::MyStrategy, v, x, hint::Integer; order) = ...
+FindFirstFunctions.search_first(::MyStrategy, v, x, hint::Integer; order) = ...
 
 # Required: the unhinted form. Most strategies just fall back to BinaryBracket.
-Base.searchsortedlast(::MyStrategy, v, x; order) = searchsortedlast(BinaryBracket(), v, x; order)
-Base.searchsortedfirst(::MyStrategy, v, x; order) = searchsortedfirst(BinaryBracket(), v, x; order)
+FindFirstFunctions.search_last(::MyStrategy, v, x; order) =
+    FindFirstFunctions.search_last(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order)
+FindFirstFunctions.search_first(::MyStrategy, v, x; order) =
+    FindFirstFunctions.search_first(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order)
 ```
 
 If your strategy ignores the hint, define just the unhinted form and have the
@@ -113,7 +132,7 @@ end
 At minimum, the hinted forms:
 
 ```julia
-function Base.searchsortedlast(
+function FindFirstFunctions.search_last(
         ::MyStrategy, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
@@ -122,7 +141,7 @@ function Base.searchsortedlast(
     ...
 end
 
-function Base.searchsortedfirst(
+function FindFirstFunctions.search_first(
         ::MyStrategy, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
@@ -133,11 +152,16 @@ end
 Plus unhinted forms (typically fallbacks):
 
 ```julia
-Base.searchsortedlast(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
-    searchsortedlast(FindFirstFunctions.BinaryBracket(), v, x; order = order)
-Base.searchsortedfirst(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
-    searchsortedfirst(FindFirstFunctions.BinaryBracket(), v, x; order = order)
+FindFirstFunctions.search_last(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
+    FindFirstFunctions.search_last(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order = order)
+FindFirstFunctions.search_first(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
+    FindFirstFunctions.search_first(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order = order)
 ```
+
+When a strategy contributes to the package itself, add a `StrategyKind`
+enum value, the kernel pair, the four dispatch-switch branches, and a
+`strategy_kind` method instead — see `src/kinds.jl` and
+`src/strategy_kind.jl`.
 
 ### Correctness check
 
@@ -147,22 +171,22 @@ inputs against `Base`:
 
 ```julia
 using Test, Random
+using FindFirstFunctions: search_last, search_first
 Random.seed!(0)
 for trial in 1:10_000
     v = sort!(randn(rand(1:1000)))
     x = randn()
     hint = rand(1:length(v))
-    @test searchsortedlast(MyStrategy(), v, x, hint) == searchsortedlast(v, x)
-    @test searchsortedfirst(MyStrategy(), v, x, hint) == searchsortedfirst(v, x)
+    @test search_last(MyStrategy(), v, x, hint) == searchsortedlast(v, x)
+    @test search_first(MyStrategy(), v, x, hint) == searchsortedfirst(v, x)
 end
 ```
 
 ### Hooking into `Auto`
 
-`Auto`'s decision tree lives in `_auto_pick` (per-query) and
-`_searchsortedlast_batched!(_, _, _, ::Auto, _)` /
-`_searchsortedfirst_batched!(_, _, _, ::Auto, _)` (batched). It is **not
-extensible from outside** — new strategies do not register themselves with
-`Auto` automatically. If you believe `Auto` should pick your strategy in
-some regime, open an issue with benchmark numbers across the regime grid in
+`Auto`'s decision tree lives in `_auto_resolve_kind` (construction-time)
+and `_auto_batched_kind` (batched). It is **not extensible from outside** —
+new strategies do not register themselves with `Auto` automatically. If you
+believe `Auto` should pick your strategy in some regime, open an issue with
+benchmark numbers across the regime grid in
 [Auto: heuristics and benchmarks](@ref).

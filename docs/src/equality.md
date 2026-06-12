@@ -37,7 +37,7 @@ FindFirstFunctions.findfirstsortedequal
 | Does `x` occur in this *unsorted* vector? | any | [`findfirstequal`](@ref FindFirstFunctions.findfirstequal) |
 | Does `x` occur in this *sorted* vector? | `DenseVector{Int64}` + `Int64` | [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal) (or `findequal(BisectThenSIMD(), v, x)` for the sentinel-returning variant) |
 | Does `x` occur in this *sorted* vector? | other eltypes | [`findequal`](@ref FindFirstFunctions.findequal) with any strategy |
-| Where would `x` insert into this sorted vector? | any | `searchsortedfirst(strategy, v, x[, hint])` |
+| Where would `x` insert into this sorted vector? | any | `search_first(strategy, v, x[, hint])` |
 
 ## SIMD primitives
 
