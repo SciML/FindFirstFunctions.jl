@@ -57,6 +57,10 @@ FFF-owned positional search for the largest index `i` with `v[i] ≤ x`
 under `order` (or `v[i] ≥ x` under `Base.Order.Reverse`). The polarity
 matches `Base.searchsortedlast`.
 
+`v` must be sorted in ascending order under `order`. Like
+`Base.searchsortedlast`, the precondition is assumed, not checked — the
+result on unsorted `v` is undefined.
+
 When the first argument is a [`StrategyKind`](@ref) value the call
 dispatches via a runtime `if/elseif` branch on the enum into the matching
 kernel. When the first argument is a stateful strategy wrapper (`Auto`,
@@ -86,8 +90,10 @@ end
     searchsorted_first(s, v, x[, hint]; order = Base.Order.Forward)
 
 FFF-owned positional search for the smallest index `i` with `v[i] ≥ x`
-under `order` (or `v[i] ≤ x` under `Base.Order.Reverse`). See
-[`searchsorted_last`](@ref) for the dispatch story.
+under `order` (or `v[i] ≤ x` under `Base.Order.Reverse`). As with
+[`searchsorted_last`](@ref), `v` must be sorted in ascending order under
+`order` (assumed, not checked). See [`searchsorted_last`](@ref) for the
+dispatch story.
 """
 @inline function searchsorted_first(
         kind::StrategyKind, v::AbstractVector, x;
