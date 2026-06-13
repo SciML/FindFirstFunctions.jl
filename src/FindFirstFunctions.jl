@@ -21,7 +21,7 @@ export
     # Properties / helpers.
     SearchProperties,
     Guesser, looks_linear,
-    # Enum + dispatchers (v3 preferred path).
+    # Enum + dispatchers.
     StrategyKind,
     KIND_BINARY_BRACKET, KIND_LINEAR_SCAN, KIND_SIMD_LINEAR_SCAN,
     KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,

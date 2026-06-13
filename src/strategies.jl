@@ -16,10 +16,10 @@ concrete subtype:
     `BracketGallop`, `ExpFromLeft`, `InterpolationSearch`,
     `BitInterpolationSearch`, `BinaryBracket`, `UniformStep`,
     `BisectThenSIMD`) are zero-field structs. Each one has a matching
-    `StrategyKind` enum value, and the v3 preferred entry point is
-    [`searchsorted_last`](@ref) / [`searchsorted_first`](@ref) with that enum tag.
-    The struct itself can also be passed to `searchsorted_last` /
-    `searchsorted_first` directly; it forwards through [`strategy_kind`](@ref).
+    `StrategyKind` enum value; pass either the struct or its enum tag to
+    [`searchsorted_last`](@ref) / [`searchsorted_first`](@ref). The struct
+    form forwards through [`strategy_kind`](@ref) and constant-folds for a
+    literal strategy, so it compiles to the same code as the enum tag.
   - **Stateful strategies** (`Auto`, `GuesserHint`) carry per-instance
     data. They dispatch via their own `searchsorted_last` / `searchsorted_first`
     multimethods.

@@ -1,24 +1,26 @@
 # Search strategies
 
-The strategies form the parameter space of the sorted-search API. Two
-ways to select a strategy:
+The strategies form the parameter space of the sorted-search API. The
+entry points are [`searchsorted_last`](@ref FindFirstFunctions.searchsorted_last) /
+[`searchsorted_first`](@ref FindFirstFunctions.searchsorted_first), and a
+strategy can be passed to them two ways:
 
-  - **v3 preferred:** pass a [`StrategyKind`](@ref FindFirstFunctions.StrategyKind)
-    enum value (e.g. `KIND_BRACKET_GALLOP`) as the first argument to
-    [`searchsorted_last`](@ref FindFirstFunctions.searchsorted_last) /
-    [`searchsorted_first`](@ref FindFirstFunctions.searchsorted_first). One enum
-    value per singleton strategy; runtime `if/elseif` dispatch into the
-    matching kernel; ~0 ns of overhead in hot loops; the inferred return
-    type is concrete regardless of which kind is picked at runtime.
-  - **Struct form:** pass a singleton strategy struct (e.g.
-    `BracketGallop()`) to the same `searchsorted_last` / `searchsorted_first`. The
+  - **As a [`StrategyKind`](@ref FindFirstFunctions.StrategyKind) enum
+    value** (e.g. `KIND_BRACKET_GALLOP`). One enum value per singleton
+    strategy; runtime `if/elseif` dispatch into the matching kernel; ~0 ns
+    of overhead in hot loops; the inferred return type is concrete
+    regardless of which kind is picked at runtime. Use this when the
+    strategy is chosen from runtime data.
+  - **As a singleton strategy struct** (e.g. `BracketGallop()`). The
     struct forwards through
     [`strategy_kind`](@ref FindFirstFunctions.strategy_kind), which
-    constant-folds for a literal strategy argument — the struct form
-    costs nothing over the kind form.
+    constant-folds for a literal strategy argument — so for a literal
+    strategy the struct form compiles to exactly the same code as the enum
+    form.
 
 FindFirstFunctions does **not** extend `Base.searchsortedlast` /
-`Base.searchsortedfirst` (the v2 API; removed in v3).
+`Base.searchsortedfirst`. The v2 API that did is removed in v3; these
+FFF-owned functions are the only search entry points.
 
 The stateful strategies — [`Auto`](@ref FindFirstFunctions.Auto) and
 [`GuesserHint`](@ref FindFirstFunctions.GuesserHint) — carry per-instance
