@@ -1,6 +1,6 @@
 # Auto strategy — resolves a `StrategyKind` from `(v, props)` at
 # construction time. Per-query dispatch is then a one-line forward to
-# `search_last` / `search_first` on the stored kind. The batched dispatch
+# `searchsorted_last` / `searchsorted_first` on the stored kind. The batched dispatch
 # (in `batched.jl`) re-resolves the kind from `(v, queries)` because the
 # gap heuristic needs the queries.
 #
@@ -9,7 +9,7 @@
 #   - The helper predicates (`_auto_is_uniform`, `_auto_simd_eligible`,
 #     `_estimate_avg_gap`, `_auto_interp_eligible`, …)
 #   - `_auto_resolve_kind(v, props)` — forward-declared in `strategies.jl`
-#   - The per-query `search_last(::Auto, ...)` / `search_first(::Auto, ...)`
+#   - The per-query `searchsorted_last(::Auto, ...)` / `searchsorted_first(::Auto, ...)`
 #     methods.
 
 # Per-query Auto threshold: under this length, the bracket-search bookkeeping
@@ -115,7 +115,7 @@ end
 # Per-query Auto dispatch. The stored kind handles every hint configuration
 # robustly — `BracketGallop` falls back to a full search when the hint is
 # absent or out of range; `LinearScan` (picked for short `v`) clamps the
-# hint and walks. So `search_last(::Auto, v, x, hint)` is a one-line
+# hint and walks. So `searchsorted_last(::Auto, v, x, hint)` is a one-line
 # forward to the kind dispatcher.
 #
 # Special case: when `kind === KIND_UNIFORM_STEP` and `props` is
@@ -129,48 +129,48 @@ end
 # ---------------------------------------------------------------------------
 
 # Hinted form: forward to the kind dispatcher.
-@inline function search_last(
+@inline function searchsorted_last(
         s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_last_uniform_step_props(s.props, v, x, order)
     else
-        search_last(s.kind, v, x, hint; order = order)
+        searchsorted_last(s.kind, v, x, hint; order = order)
     end
 end
 
-@inline function search_first(
+@inline function searchsorted_first(
         s::Auto, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_first_uniform_step_props(s.props, v, x, order)
     else
-        search_first(s.kind, v, x, hint; order = order)
+        searchsorted_first(s.kind, v, x, hint; order = order)
     end
 end
 
 # No-hint form: same forward. The kind's no-hint dispatch handles
 # fall-through to BinaryBracket for hint-using strategies.
-@inline function search_last(
+@inline function searchsorted_last(
         s::Auto, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_last_uniform_step_props(s.props, v, x, order)
     else
-        search_last(s.kind, v, x; order = order)
+        searchsorted_last(s.kind, v, x; order = order)
     end
 end
 
-@inline function search_first(
+@inline function searchsorted_first(
         s::Auto, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     return if s.kind === KIND_UNIFORM_STEP && s.props.has_props
         _kernel_first_uniform_step_props(s.props, v, x, order)
     else
-        search_first(s.kind, v, x; order = order)
+        searchsorted_first(s.kind, v, x; order = order)
     end
 end

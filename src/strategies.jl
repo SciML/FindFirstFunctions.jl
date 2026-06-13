@@ -1,6 +1,6 @@
 # Sorted-search strategy type hierarchy. The singleton strategy structs
 # (`LinearScan`, `BracketGallop`, …) are friendly names for the
-# `StrategyKind` tags — passing one to `search_last` / `search_first`
+# `StrategyKind` tags — passing one to `searchsorted_last` / `searchsorted_first`
 # forwards through `strategy_kind` and constant-folds (see
 # `strategy_kind.jl`). The stateful strategies — `Auto` and
 # `GuesserHint` — stay on the multimethod path because they carry
@@ -17,11 +17,11 @@ concrete subtype:
     `BitInterpolationSearch`, `BinaryBracket`, `UniformStep`,
     `BisectThenSIMD`) are zero-field structs. Each one has a matching
     `StrategyKind` enum value, and the v3 preferred entry point is
-    [`search_last`](@ref) / [`search_first`](@ref) with that enum tag.
-    The struct itself can also be passed to `search_last` /
-    `search_first` directly; it forwards through [`strategy_kind`](@ref).
+    [`searchsorted_last`](@ref) / [`searchsorted_first`](@ref) with that enum tag.
+    The struct itself can also be passed to `searchsorted_last` /
+    `searchsorted_first` directly; it forwards through [`strategy_kind`](@ref).
   - **Stateful strategies** (`Auto`, `GuesserHint`) carry per-instance
-    data. They dispatch via their own `search_last` / `search_first`
+    data. They dispatch via their own `searchsorted_last` / `searchsorted_first`
     multimethods.
 
 Strategies can also be passed to the batched
@@ -164,7 +164,7 @@ strategy dispatch hierarchy.
 **Stateful strategy.** `GuesserHint` carries the `Guesser` (which carries
 `idx_prev::Ref{Int}` and `linear_lookup::Bool`), so it cannot be reduced
 to a `StrategyKind` tag. It dispatches via its own
-`search_last(::GuesserHint, ...)` / `search_first(::GuesserHint, ...)`
+`searchsorted_last(::GuesserHint, ...)` / `searchsorted_first(::GuesserHint, ...)`
 methods.
 
 Use this strategy with the per-query and batched APIs whenever you have a
@@ -238,7 +238,7 @@ Stateful strategy that resolves to a concrete [`StrategyKind`](@ref) at
 construction time. The resolution uses static information available at
 construction: `props` (if supplied) plus `v` (if supplied).
 
-**Per-query** (`search_last(Auto(), v, x[, hint])`): forwards directly to the
+**Per-query** (`searchsorted_last(Auto(), v, x[, hint])`): forwards directly to the
 stored kind. `Auto()` defaults to `KIND_BINARY_BRACKET` (safe choice
 when nothing is known about `v`); `Auto(v)` resolves to a faster kind
 based on `length(v)`, `props.is_uniform`, etc. Callers that want the
@@ -259,7 +259,7 @@ mutates.
 # Fields
 
   - `kind::StrategyKind` — resolved kind. Use this field directly in
-    hot loops via `search_last(auto.kind, v, x, hint)` to skip the
+    hot loops via `searchsorted_last(auto.kind, v, x, hint)` to skip the
     `auto.props` field load entirely.
   - `props::SearchProperties` — cached properties used by the batched
     decision tree.

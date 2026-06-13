@@ -10,7 +10,7 @@ script at the end of the page generates the comparison grid.
 
 The decision differs between per-query and batched callers.
 
-### Per-query: `search_last(Auto(v), v, x[, hint])`
+### Per-query: `searchsorted_last(Auto(v), v, x[, hint])`
 
 The kind is resolved once, at construction, and every per-query call
 forwards to it:

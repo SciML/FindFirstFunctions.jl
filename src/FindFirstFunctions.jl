@@ -6,7 +6,7 @@ module FindFirstFunctions
 # caller's namespace — no runtime cost.
 #
 # v3 replaces the v2 `Base.searchsortedlast(::S, ...)` extensions with
-# the FFF-owned `search_last` / `search_first` dispatchers, which accept
+# the FFF-owned `searchsorted_last` / `searchsorted_first` dispatchers, which accept
 # a `StrategyKind` tag, a strategy struct, or a stateful strategy
 # (`Auto`, `GuesserHint`). FFF no longer extends `Base.searchsortedlast`
 # or `Base.searchsortedfirst`.
@@ -27,7 +27,7 @@ export
     KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
     KIND_INTERPOLATION_SEARCH, KIND_BIT_INTERPOLATION_SEARCH,
     KIND_UNIFORM_STEP, KIND_BISECT_THEN_SIMD,
-    search_last, search_first, strategy_kind,
+    searchsorted_last, searchsorted_first, strategy_kind,
     # Batched API.
     searchsortedfirst!, searchsortedlast!, searchsortedrange,
     # Equality search.
@@ -40,7 +40,7 @@ const USE_PTR = VERSION >= v"1.12.0-DEV.255"
 # defined in earlier files.
 include("simd_ir.jl")             # IR template + SIMD primitives
 include("equality.jl")            # findfirstequal + findfirstsortedequal
-include("kinds.jl")               # StrategyKind enum + search_last / search_first dispatchers
+include("kinds.jl")               # StrategyKind enum + searchsorted_last / searchsorted_first dispatchers
 include("strategies.jl")          # SearchStrategy + concrete strategy types + SearchProperties + Auto
 include("search_properties.jl")   # Linearity / NaN probes + populated SearchProperties constructor
 include("kernels.jl")             # Per-strategy kernel functions called by the dispatchers

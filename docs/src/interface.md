@@ -10,8 +10,8 @@ The sorted-search public API is the pair of FFF-owned generic functions
 dispatched on a strategy as the first positional argument:
 
 ```julia
-search_first(strategy, v, x[, hint]; order = Base.Order.Forward)
-search_last(strategy, v, x[, hint]; order = Base.Order.Forward)
+searchsorted_first(strategy, v, x[, hint]; order = Base.Order.Forward)
+searchsorted_last(strategy, v, x[, hint]; order = Base.Order.Forward)
 ```
 
 `strategy` is a [`StrategyKind`](@ref FindFirstFunctions.StrategyKind) enum
@@ -79,20 +79,20 @@ hint-using strategy falls back to `BinaryBracket`; the hinted branch of a
 hint-ignoring strategy discards the hint.
 
 A custom strategy defined outside the package cannot add an enum value
-(the enum is closed), so it provides its own `search_last` / `search_first`
+(the enum is closed), so it provides its own `searchsorted_last` / `searchsorted_first`
 methods instead — these are more specific than the generic
 `SearchStrategy` fallback and take precedence:
 
 ```julia
 # Required: the hinted form (the strategy's reason for existing).
-FindFirstFunctions.search_last(::MyStrategy, v, x, hint::Integer; order) = ...
-FindFirstFunctions.search_first(::MyStrategy, v, x, hint::Integer; order) = ...
+FindFirstFunctions.searchsorted_last(::MyStrategy, v, x, hint::Integer; order) = ...
+FindFirstFunctions.searchsorted_first(::MyStrategy, v, x, hint::Integer; order) = ...
 
 # Required: the unhinted form. Most strategies just fall back to BinaryBracket.
-FindFirstFunctions.search_last(::MyStrategy, v, x; order) =
-    FindFirstFunctions.search_last(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order)
-FindFirstFunctions.search_first(::MyStrategy, v, x; order) =
-    FindFirstFunctions.search_first(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order)
+FindFirstFunctions.searchsorted_last(::MyStrategy, v, x; order) =
+    FindFirstFunctions.searchsorted_last(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order)
+FindFirstFunctions.searchsorted_first(::MyStrategy, v, x; order) =
+    FindFirstFunctions.searchsorted_first(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order)
 ```
 
 If your strategy ignores the hint, define just the unhinted form and have the
@@ -132,7 +132,7 @@ end
 At minimum, the hinted forms:
 
 ```julia
-function FindFirstFunctions.search_last(
+function FindFirstFunctions.searchsorted_last(
         ::MyStrategy, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
@@ -141,7 +141,7 @@ function FindFirstFunctions.search_last(
     ...
 end
 
-function FindFirstFunctions.search_first(
+function FindFirstFunctions.searchsorted_first(
         ::MyStrategy, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward
     )
@@ -152,10 +152,10 @@ end
 Plus unhinted forms (typically fallbacks):
 
 ```julia
-FindFirstFunctions.search_last(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
-    FindFirstFunctions.search_last(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order = order)
-FindFirstFunctions.search_first(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
-    FindFirstFunctions.search_first(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order = order)
+FindFirstFunctions.searchsorted_last(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
+    FindFirstFunctions.searchsorted_last(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order = order)
+FindFirstFunctions.searchsorted_first(s::MyStrategy, v::AbstractVector, x; order = Base.Order.Forward) =
+    FindFirstFunctions.searchsorted_first(FindFirstFunctions.KIND_BINARY_BRACKET, v, x; order = order)
 ```
 
 When a strategy contributes to the package itself, add a `StrategyKind`
@@ -171,14 +171,14 @@ inputs against `Base`:
 
 ```julia
 using Test, Random
-using FindFirstFunctions: search_last, search_first
+using FindFirstFunctions: searchsorted_last, searchsorted_first
 Random.seed!(0)
 for trial in 1:10_000
     v = sort!(randn(rand(1:1000)))
     x = randn()
     hint = rand(1:length(v))
-    @test search_last(MyStrategy(), v, x, hint) == searchsortedlast(v, x)
-    @test search_first(MyStrategy(), v, x, hint) == searchsortedfirst(v, x)
+    @test searchsorted_last(MyStrategy(), v, x, hint) == searchsortedlast(v, x)
+    @test searchsorted_first(MyStrategy(), v, x, hint) == searchsortedfirst(v, x)
 end
 ```
 

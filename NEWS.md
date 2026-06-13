@@ -16,8 +16,8 @@ The 3.0 redesign replaces the multimethod dispatch on `SearchStrategy`
 singletons with a single FFF-owned dispatcher tagged by an enum:
 
 ```julia
-search_last(KIND_BRACKET_GALLOP, v, x, hint)
-search_first(KIND_INTERPOLATION_SEARCH, v, x)
+searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)
+searchsorted_first(KIND_INTERPOLATION_SEARCH, v, x)
 ```
 
 The runtime `if/elseif` over `StrategyKind` values is well-predicted in
@@ -29,7 +29,7 @@ multimethod path.
 ### Breaking: the `Base.searchsortedlast(::S, ...)` API is removed
 
 v3 no longer extends `Base.searchsortedlast` / `Base.searchsortedfirst`
-with strategy methods. The FFF-owned `search_last` / `search_first`
+with strategy methods. The FFF-owned `searchsorted_last` / `searchsorted_first`
 dispatchers are the only search entry points; they accept a
 `StrategyKind` tag, a strategy struct (which forwards through
 [`strategy_kind`] and constant-folds for literal strategies), or a
@@ -37,11 +37,11 @@ stateful strategy (`Auto`, `GuesserHint`):
 
 | v2 (removed) | v3 |
 |---|---|
-| `searchsortedlast(BracketGallop(), v, x, hint)` | `search_last(KIND_BRACKET_GALLOP, v, x, hint)` or `search_last(BracketGallop(), v, x, hint)` |
-| `searchsortedfirst(InterpolationSearch(), v, x)` | `search_first(KIND_INTERPOLATION_SEARCH, v, x)` or `search_first(InterpolationSearch(), v, x)` |
-| `searchsortedlast(UniformStep(), r, x)` | `search_last(KIND_UNIFORM_STEP, r, x)` or `search_last(UniformStep(), r, x)` |
-| `searchsortedlast(Auto(v), v, x, hint)` | `search_last(Auto(v), v, x, hint)` |
-| `searchsortedfirst(GuesserHint(g), v, x)` | `search_first(GuesserHint(g), v, x)` |
+| `searchsortedlast(BracketGallop(), v, x, hint)` | `searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)` or `searchsorted_last(BracketGallop(), v, x, hint)` |
+| `searchsortedfirst(InterpolationSearch(), v, x)` | `searchsorted_first(KIND_INTERPOLATION_SEARCH, v, x)` or `searchsorted_first(InterpolationSearch(), v, x)` |
+| `searchsortedlast(UniformStep(), r, x)` | `searchsorted_last(KIND_UNIFORM_STEP, r, x)` or `searchsorted_last(UniformStep(), r, x)` |
+| `searchsortedlast(Auto(v), v, x, hint)` | `searchsorted_last(Auto(v), v, x, hint)` |
+| `searchsortedfirst(GuesserHint(g), v, x)` | `searchsorted_first(GuesserHint(g), v, x)` |
 
 (The same rename applies to every other singleton strategy.) The batched
 in-place API (`searchsortedlast!` / `searchsortedfirst!` /
@@ -56,7 +56,7 @@ In v2, `Auto()`'s per-query `Base.searchsortedlast(::Auto, v, x, hint)`
 ran the picking logic on every call (consulting `length(v)`, hint
 validity, and `props.is_uniform`). In v3, `Auto` carries a resolved
 `StrategyKind` and per-query dispatch is a one-line forward to
-`search_last(s.kind, v, x, hint)`:
+`searchsorted_last(s.kind, v, x, hint)`:
 
   - `Auto()` defaults to `KIND_BINARY_BRACKET` (safe; matches
     `Base.searchsortedlast` exactly).
@@ -105,7 +105,7 @@ invoked by `Auto(v)` when the resolved kind is `KIND_UNIFORM_STEP`:
 ```julia
 # v3 closed-form O(1) lookup with no per-query division:
 a = Auto(0.0:0.5:100.0)           # kind = KIND_UNIFORM_STEP, inv_step = 2.0
-search_last(a, r, 3.7)            # → floor((3.7 - 0.0) * 2.0) + 1 = 8
+searchsorted_last(a, r, 3.7)            # → floor((3.7 - 0.0) * 2.0) + 1 = 8
 ```
 
 This subsumes the never-merged `DirectStep` strategy (PR #74) — its
@@ -147,13 +147,13 @@ which forwards through the same struct → kind mapping.
 The v2 `src/dispatch.jl` file (Base.searchsortedlast extensions per
 strategy) is gone. In its place:
 
-  - `src/kinds.jl` — `StrategyKind` enum and `search_last` /
-    `search_first` enum dispatchers.
+  - `src/kinds.jl` — `StrategyKind` enum and `searchsorted_last` /
+    `searchsorted_first` enum dispatchers.
   - `src/kernels.jl` — per-strategy kernel functions
     (`_kernel_last_bracket_gallop`, etc.), lifted out of the v2 method
     bodies.
   - `src/strategy_kind.jl` — the struct → kind mapping plus the
-    struct-valued `search_last(::S, ...)` / `search_first(::S, ...)`
+    struct-valued `searchsorted_last(::S, ...)` / `searchsorted_first(::S, ...)`
     entry points that forward through it.
 
 ## 2.0.0

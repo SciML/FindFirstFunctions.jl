@@ -44,25 +44,25 @@ end
     rep = JET.report_call(guesser, (Float64,))
     @test length(JET.get_reports(rep)) == 0
 
-    # search_last with each StrategyKind - the v3 enum-dispatch hot path.
+    # searchsorted_last with each StrategyKind - the v3 enum-dispatch hot path.
     for kind in (
             KIND_BINARY_BRACKET, KIND_LINEAR_SCAN, KIND_BRACKET_GALLOP,
             KIND_EXP_FROM_LEFT, KIND_INTERPOLATION_SEARCH,
         )
         rep = JET.report_call(
-            (k, v, x, h) -> FindFirstFunctions.search_last(k, v, x, h),
+            (k, v, x, h) -> FindFirstFunctions.searchsorted_last(k, v, x, h),
             (typeof(kind), Vector{Int64}, Int64, Int64),
         )
         @test length(JET.get_reports(rep)) == 0
     end
 
-    # search_first with each StrategyKind
+    # searchsorted_first with each StrategyKind
     for kind in (
             KIND_BINARY_BRACKET, KIND_LINEAR_SCAN, KIND_BRACKET_GALLOP,
             KIND_EXP_FROM_LEFT, KIND_INTERPOLATION_SEARCH,
         )
         rep = JET.report_call(
-            (k, v, x, h) -> FindFirstFunctions.search_first(k, v, x, h),
+            (k, v, x, h) -> FindFirstFunctions.searchsorted_first(k, v, x, h),
             (typeof(kind), Vector{Int64}, Int64, Int64),
         )
         @test length(JET.get_reports(rep)) == 0
@@ -125,19 +125,19 @@ end
         @test isempty(allocs)
     end
 
-    @testset "search_last via enum tag" begin
+    @testset "searchsorted_last via enum tag" begin
         # Each kind on Int64 / Float64 dense vectors: no allocations.
         for kind in (
                 KIND_BINARY_BRACKET, KIND_LINEAR_SCAN,
                 KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
             )
             allocs = check_allocs(
-                (k, v, x, h) -> FindFirstFunctions.search_last(k, v, x, h),
+                (k, v, x, h) -> FindFirstFunctions.searchsorted_last(k, v, x, h),
                 (typeof(kind), Vector{Int64}, Int64, Int64),
             )
             @test isempty(allocs)
             allocs = check_allocs(
-                (k, v, x, h) -> FindFirstFunctions.search_first(k, v, x, h),
+                (k, v, x, h) -> FindFirstFunctions.searchsorted_first(k, v, x, h),
                 (typeof(kind), Vector{Int64}, Int64, Int64),
             )
             @test isempty(allocs)

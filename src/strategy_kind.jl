@@ -1,12 +1,12 @@
 # Strategy structs as values: the `strategy_kind` mapping from a strategy
-# struct to its `StrategyKind` tag, plus `search_last` / `search_first`
+# struct to its `StrategyKind` tag, plus `searchsorted_last` / `searchsorted_first`
 # methods that accept a singleton strategy struct directly and forward
 # through the mapping. For a literal strategy argument
-# (`search_last(BracketGallop(), v, x, hint)`) the mapping constant-folds,
+# (`searchsorted_last(BracketGallop(), v, x, hint)`) the mapping constant-folds,
 # so the struct form costs nothing over the kind form.
 #
 # v3 does not extend `Base.searchsortedlast` / `Base.searchsortedfirst`
-# with strategy methods — `search_last` / `search_first` are the only
+# with strategy methods — `searchsorted_last` / `searchsorted_first` are the only
 # search entry points.
 
 # `strategy_kind(s)` — the public mapping from strategy struct → tag.
@@ -29,21 +29,21 @@ strategy_kind(::GuesserHint) = throw(
 )
 
 # Struct-valued entry points. `Auto` and `GuesserHint` define their own,
-# more specific `search_last` / `search_first` methods (in `auto.jl` and
+# more specific `searchsorted_last` / `searchsorted_first` methods (in `auto.jl` and
 # `guesser.jl`), so this fallback only ever sees the zero-state singletons.
-@inline search_last(
+@inline searchsorted_last(
     s::SearchStrategy, v::AbstractVector, x;
     order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(strategy_kind(s), v, x; order = order)
-@inline search_first(
+) = searchsorted_last(strategy_kind(s), v, x; order = order)
+@inline searchsorted_first(
     s::SearchStrategy, v::AbstractVector, x;
     order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(strategy_kind(s), v, x; order = order)
-@inline search_last(
+) = searchsorted_first(strategy_kind(s), v, x; order = order)
+@inline searchsorted_last(
     s::SearchStrategy, v::AbstractVector, x, hint::Integer;
     order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(strategy_kind(s), v, x, hint; order = order)
-@inline search_first(
+) = searchsorted_last(strategy_kind(s), v, x, hint; order = order)
+@inline searchsorted_first(
     s::SearchStrategy, v::AbstractVector, x, hint::Integer;
     order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(strategy_kind(s), v, x, hint; order = order)
+) = searchsorted_first(strategy_kind(s), v, x, hint; order = order)

@@ -31,15 +31,15 @@ using PrecompileTools: @compile_workload, @setup_workload
                 Auto(SearchProperties(linear_vec)),
                 Auto(linear_vec),
             )
-            search_first(strategy, vec_int64, Int64(8), Int64(1))
-            search_last(strategy, vec_int64, Int64(8), Int64(1))
+            searchsorted_first(strategy, vec_int64, Int64(8), Int64(1))
+            searchsorted_last(strategy, vec_int64, Int64(8), Int64(1))
         end
         # Auto-with-uniform-range — exercises the props-aware UniformStep kernel.
         let r = 0.0:0.5:10.0
             auto_r = Auto(r)
-            search_last(auto_r, r, 3.7)
-            search_first(auto_r, r, 3.7)
-            search_last(auto_r, r, 3.7, 1)
+            searchsorted_last(auto_r, r, 3.7)
+            searchsorted_first(auto_r, r, 3.7)
+            searchsorted_last(auto_r, r, 3.7, 1)
         end
         # findequal: generic + BisectThenSIMD shortcut for Int64 dense vectors.
         for strategy in (
@@ -51,11 +51,11 @@ using PrecompileTools: @compile_workload, @setup_workload
         end
         # SIMDLinearScan's Float64 specialization.
         let vec_f64 = collect(1.0:1.0:16.0)
-            search_first(SIMDLinearScan(), vec_f64, 8.0, 1)
-            search_last(SIMDLinearScan(), vec_f64, 8.0, 1)
+            searchsorted_first(SIMDLinearScan(), vec_f64, 8.0, 1)
+            searchsorted_last(SIMDLinearScan(), vec_f64, 8.0, 1)
         end
-        search_first(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
-        search_last(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
+        searchsorted_first(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
+        searchsorted_last(GuesserHint(Guesser(vec_int64)), vec_int64, Int64(8))
 
         # Strategy dispatch — batched in-place forms.
         idx_out = Vector{Int}(undef, 4)

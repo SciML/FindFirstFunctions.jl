@@ -1,6 +1,6 @@
 # `Guesser` correlated-lookup helper + the public `looks_linear` probe it
 # uses + the `GuesserHint` strategy dispatch that plugs a `Guesser` into
-# the v3 `search_last` / `search_first` API.
+# the v3 `searchsorted_last` / `searchsorted_first` API.
 
 """
     looks_linear(v; threshold = 1e-2)
@@ -67,32 +67,32 @@ end
 # struct (not via a `StrategyKind`). The cost per call is one
 # `guesser(x)` + one BracketGallop call + one `idx_prev[]` write.
 
-@inline function search_last(
+@inline function searchsorted_last(
         s::GuesserHint, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     @assert v === s.guesser.v
-    out = search_last(KIND_BRACKET_GALLOP, v, x, s.guesser(x); order = order)
+    out = searchsorted_last(KIND_BRACKET_GALLOP, v, x, s.guesser(x); order = order)
     s.guesser.idx_prev[] = out
     return out
 end
 
-@inline function search_first(
+@inline function searchsorted_first(
         s::GuesserHint, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     @assert v === s.guesser.v
-    out = search_first(KIND_BRACKET_GALLOP, v, x, s.guesser(x); order = order)
+    out = searchsorted_first(KIND_BRACKET_GALLOP, v, x, s.guesser(x); order = order)
     s.guesser.idx_prev[] = out
     return out
 end
 
 # GuesserHint ignores any externally-supplied hint.
-@inline search_last(
+@inline searchsorted_last(
     s::GuesserHint, v::AbstractVector, x, ::Integer;
     order::Base.Order.Ordering = Base.Order.Forward,
-) = search_last(s, v, x; order = order)
-@inline search_first(
+) = searchsorted_last(s, v, x; order = order)
+@inline searchsorted_first(
     s::GuesserHint, v::AbstractVector, x, ::Integer;
     order::Base.Order.Ordering = Base.Order.Forward,
-) = search_first(s, v, x; order = order)
+) = searchsorted_first(s, v, x; order = order)

@@ -37,16 +37,16 @@ end
         end
 
         @safetestset "Guesser" begin
-            using FindFirstFunctions: Guesser, GuesserHint, search_last, search_first
+            using FindFirstFunctions: Guesser, GuesserHint, searchsorted_last, searchsorted_first
             v = collect(LinRange(0, 10, 4))
             guesser_linear = Guesser(v)
             guesser_prev = Guesser(v, Ref(1), false)
             @test guesser_linear.linear_lookup
 
             # Guesser feeds the dispatched API via GuesserHint.
-            @test search_first(GuesserHint(guesser_linear), v, 4.0) == 3
-            @test search_first(GuesserHint(guesser_linear), v, 1.4234326478e24) == 5
-            @test search_last(GuesserHint(guesser_prev), v, 4.0) == 2
+            @test searchsorted_first(GuesserHint(guesser_linear), v, 4.0) == 3
+            @test searchsorted_first(GuesserHint(guesser_linear), v, 1.4234326478e24) == 5
+            @test searchsorted_last(GuesserHint(guesser_prev), v, 4.0) == 2
             @test guesser_prev.idx_prev[] == 2
 
             # Edge case: single-element v.
@@ -56,12 +56,12 @@ end
             @test guesser(100) == 1
             @test guesser(42.0) == 1
             @test guesser(0) == 1
-            @test search_first(GuesserHint(guesser), v1, 0) == 1
-            @test search_first(GuesserHint(guesser), v1, 100) == 2  # see Base.searchsortedfirst
-            @test search_first(GuesserHint(guesser), v1, 42.0) == 1
-            @test search_last(GuesserHint(guesser), v1, 0) == 0  # see Base.searchsortedlast
-            @test search_last(GuesserHint(guesser), v1, 100) == 1
-            @test search_last(GuesserHint(guesser), v1, 42.0) == 1
+            @test searchsorted_first(GuesserHint(guesser), v1, 0) == 1
+            @test searchsorted_first(GuesserHint(guesser), v1, 100) == 2  # see Base.searchsortedfirst
+            @test searchsorted_first(GuesserHint(guesser), v1, 42.0) == 1
+            @test searchsorted_last(GuesserHint(guesser), v1, 0) == 0  # see Base.searchsortedlast
+            @test searchsorted_last(GuesserHint(guesser), v1, 100) == 1
+            @test searchsorted_last(GuesserHint(guesser), v1, 42.0) == 1
         end
 
         @safetestset "Native reverse-order paths (issue #67)" begin
@@ -90,9 +90,9 @@ end
                             InterpolationSearch(), BitInterpolationSearch(),
                             Auto(),
                         )
-                        @test search_last(strategy, v, x, hint; order = order) ==
+                        @test searchsorted_last(strategy, v, x, hint; order = order) ==
                             expected_last
-                        @test search_first(strategy, v, x, hint; order = order) ==
+                        @test searchsorted_first(strategy, v, x, hint; order = order) ==
                             expected_first
                     end
                 end
@@ -110,9 +110,9 @@ end
                             BracketGallop(), ExpFromLeft(),
                             InterpolationSearch(), Auto(),
                         )
-                        @test search_last(strategy, v, x, hint; order = order) ==
+                        @test searchsorted_last(strategy, v, x, hint; order = order) ==
                             expected_last
-                        @test search_first(strategy, v, x, hint; order = order) ==
+                        @test searchsorted_first(strategy, v, x, hint; order = order) ==
                             expected_first
                     end
                 end
@@ -125,17 +125,17 @@ end
                     x = exp(rand(rng) * log(1.0e6))
                     expected_last = searchsortedlast(v, x, order)
                     expected_first = searchsortedfirst(v, x, order)
-                    @test search_last(
+                    @test searchsorted_last(
                         BitInterpolationSearch(), v, x; order = order
                     ) == expected_last
-                    @test search_first(
+                    @test searchsorted_first(
                         BitInterpolationSearch(), v, x; order = order
                     ) == expected_first
                 end
                 # Non-positive endpoint falls back to BinaryBracket cleanly.
                 v_signed = sort!(randn(rng, 100); rev = true)
                 for x in (-0.5, 0.0, 0.5, -2.0, 2.0)
-                    @test search_last(
+                    @test searchsorted_last(
                         BitInterpolationSearch(), v_signed, x; order = order
                     ) == searchsortedlast(v_signed, x, order)
                 end
@@ -149,13 +149,13 @@ end
                         SIMDLinearScan(), ExpFromLeft(),
                         InterpolationSearch(), BitInterpolationSearch(),
                     )
-                    @test search_last(strategy, v, 100.0, 5; order = order) ==
+                    @test searchsorted_last(strategy, v, 100.0, 5; order = order) ==
                         searchsortedlast(v, 100.0, order)
-                    @test search_last(strategy, v, -100.0, 5; order = order) ==
+                    @test searchsorted_last(strategy, v, -100.0, 5; order = order) ==
                         searchsortedlast(v, -100.0, order)
-                    @test search_first(strategy, v, 100.0, 5; order = order) ==
+                    @test searchsorted_first(strategy, v, 100.0, 5; order = order) ==
                         searchsortedfirst(v, 100.0, order)
-                    @test search_first(strategy, v, -100.0, 5; order = order) ==
+                    @test searchsorted_first(strategy, v, -100.0, 5; order = order) ==
                         searchsortedfirst(v, -100.0, order)
                 end
             end
@@ -186,18 +186,18 @@ end
                         first(r) + (last(r) - first(r)) / 2,
                         last(r), last(r) + 1, 0,
                     )
-                    @test search_last(UniformStep(), r, x) ==
+                    @test searchsorted_last(UniformStep(), r, x) ==
                         searchsortedlast(r, x)
-                    @test search_first(UniformStep(), r, x) ==
+                    @test searchsorted_first(UniformStep(), r, x) ==
                         searchsortedfirst(r, x)
-                    @test search_last(Auto(), r, x) == searchsortedlast(r, x)
-                    @test search_first(Auto(), r, x) == searchsortedfirst(r, x)
+                    @test searchsorted_last(Auto(), r, x) == searchsortedlast(r, x)
+                    @test searchsorted_first(Auto(), r, x) == searchsortedfirst(r, x)
                     h = max(1, length(r) ÷ 2)
-                    @test search_last(UniformStep(), r, x, h) ==
+                    @test searchsorted_last(UniformStep(), r, x, h) ==
                         searchsortedlast(r, x)
-                    @test search_first(UniformStep(), r, x, h) ==
+                    @test searchsorted_first(UniformStep(), r, x, h) ==
                         searchsortedfirst(r, x)
-                    @test search_last(Auto(), r, x, h) == searchsortedlast(r, x)
+                    @test searchsorted_last(Auto(), r, x, h) == searchsortedlast(r, x)
                 end
             end
 
@@ -208,35 +208,35 @@ end
                         (first(r) + last(r)) / 2,
                         last(r), last(r) - 1, 0,
                     )
-                    @test search_last(UniformStep(), r, x; order = order) ==
+                    @test searchsorted_last(UniformStep(), r, x; order = order) ==
                         searchsortedlast(r, x, order)
-                    @test search_first(UniformStep(), r, x; order = order) ==
+                    @test searchsorted_first(UniformStep(), r, x; order = order) ==
                         searchsortedfirst(r, x, order)
-                    @test search_last(Auto(), r, x; order = order) ==
+                    @test searchsorted_last(Auto(), r, x; order = order) ==
                         searchsortedlast(r, x, order)
-                    @test search_first(Auto(), r, x; order = order) ==
+                    @test searchsorted_first(Auto(), r, x; order = order) ==
                         searchsortedfirst(r, x, order)
                 end
             end
 
             # Edge cases.
             r_empty = 1:0
-            @test search_last(UniformStep(), r_empty, 5) == 0
-            @test search_first(UniformStep(), r_empty, 5) == 1
-            @test search_last(Auto(), r_empty, 5) == 0
+            @test searchsorted_last(UniformStep(), r_empty, 5) == 0
+            @test searchsorted_first(UniformStep(), r_empty, 5) == 1
+            @test searchsorted_last(Auto(), r_empty, 5) == 0
             r_single = 42:42
-            @test search_last(UniformStep(), r_single, 41) == 0
-            @test search_last(UniformStep(), r_single, 42) == 1
-            @test search_last(UniformStep(), r_single, 43) == 1
-            @test search_first(UniformStep(), r_single, 41) == 1
-            @test search_first(UniformStep(), r_single, 42) == 1
-            @test search_first(UniformStep(), r_single, 43) == 2
+            @test searchsorted_last(UniformStep(), r_single, 41) == 0
+            @test searchsorted_last(UniformStep(), r_single, 42) == 1
+            @test searchsorted_last(UniformStep(), r_single, 43) == 1
+            @test searchsorted_first(UniformStep(), r_single, 41) == 1
+            @test searchsorted_first(UniformStep(), r_single, 42) == 1
+            @test searchsorted_first(UniformStep(), r_single, 43) == 2
 
             # Non-Range vector falls back to BinaryBracket.
             v = collect(0.0:0.1:10.0)
             for x in (-1.0, 0.0, 5.5, 10.0, 100.0)
-                @test search_last(UniformStep(), v, x) == searchsortedlast(v, x)
-                @test search_first(UniformStep(), v, x) == searchsortedfirst(v, x)
+                @test searchsorted_last(UniformStep(), v, x) == searchsortedlast(v, x)
+                @test searchsorted_first(UniformStep(), v, x) == searchsortedfirst(v, x)
             end
 
             # Auto() answers match Base's range-aware overload and the call
@@ -245,13 +245,13 @@ end
             # bytes for the 32-byte `Auto{Float64}` argument (1.11 elides
             # the allocation entirely) — hence the `<= 64` bound below.
             r_big = 0.0:0.001:100.0
-            @test search_last(Auto(), r_big, 50.5) == searchsortedlast(r_big, 50.5)
-            @test search_first(Auto(), r_big, 50.5) ==
+            @test searchsorted_last(Auto(), r_big, 50.5) == searchsortedlast(r_big, 50.5)
+            @test searchsorted_first(Auto(), r_big, 50.5) ==
                 searchsortedfirst(r_big, 50.5)
             # Warm up once, then verify allocation is tiny (kwarg trampoline only).
-            search_last(Auto(), r_big, 50.5)
-            @test @allocated(search_last(Auto(), r_big, 50.5)) <= 64
-            @test @allocated(search_first(Auto(), r_big, 50.5)) <= 64
+            searchsorted_last(Auto(), r_big, 50.5)
+            @test @allocated(searchsorted_last(Auto(), r_big, 50.5)) <= 64
+            @test @allocated(searchsorted_first(Auto(), r_big, 50.5)) <= 64
 
             # Batched path on AbstractRange.
             r = 0.0:0.5:100.0
@@ -270,7 +270,7 @@ end
         @safetestset "Custom ordering for strategy dispatch" begin
             using FindFirstFunctions:
                 Guesser, GuesserHint, BracketGallop, LinearScan,
-                ExpFromLeft, BinaryBracket, Auto, search_last, search_first
+                ExpFromLeft, BinaryBracket, Auto, searchsorted_last, searchsorted_first
 
             v_rev = collect(10.0:-1.0:1.0)
             for x in (5.0, 10.0, 1.0, 0.0, 11.0),
@@ -279,38 +279,38 @@ end
                         BracketGallop(), LinearScan(), ExpFromLeft(), Auto(),
                     )
 
-                @test search_first(strategy, v_rev, x, hint; order = Base.Order.Reverse) ==
+                @test searchsorted_first(strategy, v_rev, x, hint; order = Base.Order.Reverse) ==
                     searchsortedfirst(v_rev, x, Base.Order.Reverse)
-                @test search_last(strategy, v_rev, x, hint; order = Base.Order.Reverse) ==
+                @test searchsorted_last(strategy, v_rev, x, hint; order = Base.Order.Reverse) ==
                     searchsortedlast(v_rev, x, Base.Order.Reverse)
             end
             # BinaryBracket ignores any hint.
             for x in (5.0, 10.0, 1.0, 0.0, 11.0)
-                @test search_first(BinaryBracket(), v_rev, x; order = Base.Order.Reverse) ==
+                @test searchsorted_first(BinaryBracket(), v_rev, x; order = Base.Order.Reverse) ==
                     searchsortedfirst(v_rev, x, Base.Order.Reverse)
-                @test search_last(BinaryBracket(), v_rev, x; order = Base.Order.Reverse) ==
+                @test searchsorted_last(BinaryBracket(), v_rev, x; order = Base.Order.Reverse) ==
                     searchsortedlast(v_rev, x, Base.Order.Reverse)
             end
 
             # GuesserHint with reverse order.
             guesser_rev = Guesser(v_rev)
-            @test search_first(GuesserHint(guesser_rev), v_rev, 5.0; order = Base.Order.Reverse) ==
+            @test searchsorted_first(GuesserHint(guesser_rev), v_rev, 5.0; order = Base.Order.Reverse) ==
                 searchsortedfirst(v_rev, 5.0, Base.Order.Reverse)
-            @test search_last(GuesserHint(guesser_rev), v_rev, 5.0; order = Base.Order.Reverse) ==
+            @test searchsorted_last(GuesserHint(guesser_rev), v_rev, 5.0; order = Base.Order.Reverse) ==
                 searchsortedlast(v_rev, 5.0, Base.Order.Reverse)
 
             # Default (Forward) order still resolves correctly.
             v_fwd = collect(1.0:1.0:10.0)
             for strategy in (BracketGallop(), LinearScan(), ExpFromLeft(), Auto())
-                @test search_first(strategy, v_fwd, 5.0, 1) == searchsortedfirst(v_fwd, 5.0)
-                @test search_last(strategy, v_fwd, 5.0, 1) == searchsortedlast(v_fwd, 5.0)
+                @test searchsorted_first(strategy, v_fwd, 5.0, 1) == searchsortedfirst(v_fwd, 5.0)
+                @test searchsorted_last(strategy, v_fwd, 5.0, 1) == searchsortedlast(v_fwd, 5.0)
             end
         end
 
         @safetestset "SearchStrategy dispatch (single query)" begin
             using FindFirstFunctions:
                 SearchStrategy, LinearScan, BracketGallop, BinaryBracket, Auto,
-                search_last, search_first
+                searchsorted_last, searchsorted_first
 
             for n in (0, 1, 2, 8, 33, 257)
                 v = collect(1:n)
@@ -323,51 +323,51 @@ end
                     expected_first = searchsortedfirst(v, x)
 
                     # BinaryBracket — ignores any hint
-                    @test search_last(BinaryBracket(), v, x) == expected_last
-                    @test search_first(BinaryBracket(), v, x) == expected_first
-                    @test search_last(BinaryBracket(), v, x, 1) == expected_last
-                    @test search_first(BinaryBracket(), v, x, 1) == expected_first
+                    @test searchsorted_last(BinaryBracket(), v, x) == expected_last
+                    @test searchsorted_first(BinaryBracket(), v, x) == expected_first
+                    @test searchsorted_last(BinaryBracket(), v, x, 1) == expected_last
+                    @test searchsorted_first(BinaryBracket(), v, x, 1) == expected_first
 
                     # Strategy with hint anywhere in 1..n agrees with Base
                     for h in unique!([1, max(1, n ÷ 4), n ÷ 2, max(1, 3n ÷ 4), n])
-                        @test search_last(LinearScan(), v, x, h) == expected_last
-                        @test search_first(LinearScan(), v, x, h) == expected_first
-                        @test search_last(BracketGallop(), v, x, h) == expected_last
-                        @test search_first(BracketGallop(), v, x, h) == expected_first
-                        @test search_last(Auto(), v, x, h) == expected_last
-                        @test search_first(Auto(), v, x, h) == expected_first
+                        @test searchsorted_last(LinearScan(), v, x, h) == expected_last
+                        @test searchsorted_first(LinearScan(), v, x, h) == expected_first
+                        @test searchsorted_last(BracketGallop(), v, x, h) == expected_last
+                        @test searchsorted_first(BracketGallop(), v, x, h) == expected_first
+                        @test searchsorted_last(Auto(), v, x, h) == expected_last
+                        @test searchsorted_first(Auto(), v, x, h) == expected_first
                     end
 
                     # No-hint forms fall back to BinaryBracket
-                    @test search_last(LinearScan(), v, x) == expected_last
-                    @test search_first(LinearScan(), v, x) == expected_first
-                    @test search_last(BracketGallop(), v, x) == expected_last
-                    @test search_first(BracketGallop(), v, x) == expected_first
-                    @test search_last(Auto(), v, x) == expected_last
-                    @test search_first(Auto(), v, x) == expected_first
+                    @test searchsorted_last(LinearScan(), v, x) == expected_last
+                    @test searchsorted_first(LinearScan(), v, x) == expected_first
+                    @test searchsorted_last(BracketGallop(), v, x) == expected_last
+                    @test searchsorted_first(BracketGallop(), v, x) == expected_first
+                    @test searchsorted_last(Auto(), v, x) == expected_last
+                    @test searchsorted_first(Auto(), v, x) == expected_first
 
                     # Out-of-range hint → Auto falls back to BinaryBracket
-                    @test search_last(Auto(), v, x, 0) == expected_last
-                    @test search_first(Auto(), v, x, 0) == expected_first
-                    @test search_last(Auto(), v, x, n + 1) == expected_last
-                    @test search_first(Auto(), v, x, n + 1) == expected_first
+                    @test searchsorted_last(Auto(), v, x, 0) == expected_last
+                    @test searchsorted_first(Auto(), v, x, 0) == expected_first
+                    @test searchsorted_last(Auto(), v, x, n + 1) == expected_last
+                    @test searchsorted_first(Auto(), v, x, n + 1) == expected_first
                 end
             end
 
             # Reverse order
             v_rev = collect(10.0:-1.0:1.0)
             for x in (0.5, 1.0, 5.0, 10.0, 11.0), h in (1, 5, 10)
-                @test search_last(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
+                @test searchsorted_last(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
                     searchsortedlast(v_rev, x, Base.Order.Reverse)
-                @test search_first(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
+                @test searchsorted_first(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
                     searchsortedfirst(v_rev, x, Base.Order.Reverse)
-                @test search_last(LinearScan(), v_rev, x, h; order = Base.Order.Reverse) ==
+                @test searchsorted_last(LinearScan(), v_rev, x, h; order = Base.Order.Reverse) ==
                     searchsortedlast(v_rev, x, Base.Order.Reverse)
-                @test search_first(LinearScan(), v_rev, x, h; order = Base.Order.Reverse) ==
+                @test searchsorted_first(LinearScan(), v_rev, x, h; order = Base.Order.Reverse) ==
                     searchsortedfirst(v_rev, x, Base.Order.Reverse)
-                @test search_last(Auto(), v_rev, x, h; order = Base.Order.Reverse) ==
+                @test searchsorted_last(Auto(), v_rev, x, h; order = Base.Order.Reverse) ==
                     searchsortedlast(v_rev, x, Base.Order.Reverse)
-                @test search_first(Auto(), v_rev, x, h; order = Base.Order.Reverse) ==
+                @test searchsorted_first(Auto(), v_rev, x, h; order = Base.Order.Reverse) ==
                     searchsortedfirst(v_rev, x, Base.Order.Reverse)
             end
 
@@ -381,69 +381,69 @@ end
         @safetestset "ExpFromLeft and InterpolationSearch" begin
             using FindFirstFunctions:
                 ExpFromLeft, InterpolationSearch, BinaryBracket,
-                search_last, search_first
+                searchsorted_last, searchsorted_first
 
             # ExpFromLeft on uniform Int range
             v = collect(1:1000)
             for x in (0, 1, 50, 250, 500, 999, 1000, 1001), h in (1, 50, 500, 1000)
-                @test search_last(ExpFromLeft(), v, x, h) ==
+                @test searchsorted_last(ExpFromLeft(), v, x, h) ==
                     searchsortedlast(v, x)
-                @test search_first(ExpFromLeft(), v, x, h) ==
+                @test searchsorted_first(ExpFromLeft(), v, x, h) ==
                     searchsortedfirst(v, x)
             end
             # ExpFromLeft without hint falls back to BinaryBracket
-            @test search_last(ExpFromLeft(), v, 500) == searchsortedlast(v, 500)
-            @test search_first(ExpFromLeft(), v, 500) == searchsortedfirst(v, 500)
+            @test searchsorted_last(ExpFromLeft(), v, 500) == searchsortedlast(v, 500)
+            @test searchsorted_first(ExpFromLeft(), v, 500) == searchsortedfirst(v, 500)
 
             # InterpolationSearch on uniform Float64 range
             vf = collect(0.0:0.1:10.0)
             for x in (-1.0, 0.0, 0.05, 1.0, 5.5, 9.95, 10.0, 11.0)
-                @test search_last(InterpolationSearch(), vf, x) ==
+                @test searchsorted_last(InterpolationSearch(), vf, x) ==
                     searchsortedlast(vf, x)
-                @test search_first(InterpolationSearch(), vf, x) ==
+                @test searchsorted_first(InterpolationSearch(), vf, x) ==
                     searchsortedfirst(vf, x)
             end
 
             # InterpolationSearch on log-spaced (non-uniform) — must still be correct
             vlog = exp.(range(log(0.1), log(100.0); length = 256))
             for x in (0.05, 0.1, 1.0, 50.0, 100.0, 150.0)
-                @test search_last(InterpolationSearch(), vlog, x) ==
+                @test searchsorted_last(InterpolationSearch(), vlog, x) ==
                     searchsortedlast(vlog, x)
-                @test search_first(InterpolationSearch(), vlog, x) ==
+                @test searchsorted_first(InterpolationSearch(), vlog, x) ==
                     searchsortedfirst(vlog, x)
             end
 
             # InterpolationSearch ignores hint (computes its own guess)
             for h in (1, 100, 256)
-                @test search_last(InterpolationSearch(), vlog, 50.0, h) ==
+                @test searchsorted_last(InterpolationSearch(), vlog, 50.0, h) ==
                     searchsortedlast(vlog, 50.0)
             end
 
             # InterpolationSearch falls back to BinaryBracket on non-Number eltypes
             vs = ["a", "b", "c", "d"]
-            @test search_last(InterpolationSearch(), vs, "c") ==
+            @test searchsorted_last(InterpolationSearch(), vs, "c") ==
                 searchsortedlast(vs, "c")
-            @test search_first(InterpolationSearch(), vs, "c", 2) ==
+            @test searchsorted_first(InterpolationSearch(), vs, "c", 2) ==
                 searchsortedfirst(vs, "c")
 
             # InterpolationSearch on a constant vector (span=0) shouldn't divide
             # by zero; should fall through to a bounded search and return a
             # correct result.
             vc = fill(3.0, 16)
-            @test search_last(InterpolationSearch(), vc, 3.0) ==
+            @test searchsorted_last(InterpolationSearch(), vc, 3.0) ==
                 searchsortedlast(vc, 3.0)
-            @test search_last(InterpolationSearch(), vc, 2.0) ==
+            @test searchsorted_last(InterpolationSearch(), vc, 2.0) ==
                 searchsortedlast(vc, 2.0)
-            @test search_last(InterpolationSearch(), vc, 4.0) ==
+            @test searchsorted_last(InterpolationSearch(), vc, 4.0) ==
                 searchsortedlast(vc, 4.0)
 
             # Edge: 1-element and 2-element vectors
-            @test search_last(ExpFromLeft(), [5], 4, 1) == 0
-            @test search_last(ExpFromLeft(), [5], 5, 1) == 1
-            @test search_last(ExpFromLeft(), [5], 6, 1) == 1
-            @test search_first(ExpFromLeft(), [5, 10], 7, 1) == 2
-            @test search_last(InterpolationSearch(), [5], 4) == 0
-            @test search_last(InterpolationSearch(), [5, 10], 7) == 1
+            @test searchsorted_last(ExpFromLeft(), [5], 4, 1) == 0
+            @test searchsorted_last(ExpFromLeft(), [5], 5, 1) == 1
+            @test searchsorted_last(ExpFromLeft(), [5], 6, 1) == 1
+            @test searchsorted_first(ExpFromLeft(), [5, 10], 7, 1) == 2
+            @test searchsorted_last(InterpolationSearch(), [5], 4) == 0
+            @test searchsorted_last(InterpolationSearch(), [5, 10], 7) == 1
         end
 
         @safetestset "Batched Auto heuristic" begin
@@ -662,7 +662,7 @@ end
             using FindFirstFunctions
             using FindFirstFunctions:
                 SearchProperties, Auto, KIND_UNIFORM_STEP,
-                search_last, search_first
+                searchsorted_last, searchsorted_first
 
             # Auto{T} carries SearchProperties{T}.
             @test Auto() isa Auto{Float64}
@@ -674,7 +674,7 @@ end
 
             # The props-aware UniformStep path is taken when kind ===
             # KIND_UNIFORM_STEP. For uniform data, Auto resolves to
-            # KIND_UNIFORM_STEP and `search_last(::Auto, ...)` uses the
+            # KIND_UNIFORM_STEP and `searchsorted_last(::Auto, ...)` uses the
             # precomputed first_val + inv_step closed-form path.
             for r in (
                     0.0:0.5:100.0,
@@ -691,11 +691,11 @@ end
                     end
                     want_last = searchsortedlast(r, x)
                     want_first = searchsortedfirst(r, x)
-                    @test search_last(a, r, x) == want_last
-                    @test search_first(a, r, x) == want_first
+                    @test searchsorted_last(a, r, x) == want_last
+                    @test searchsorted_first(a, r, x) == want_first
                     # Hinted form takes the same path.
-                    @test search_last(a, r, x, 1) == want_last
-                    @test search_first(a, r, x, 1) == want_first
+                    @test searchsorted_last(a, r, x, 1) == want_last
+                    @test searchsorted_first(a, r, x, 1) == want_first
                 end
             end
 
@@ -704,9 +704,9 @@ end
             a_rev = Auto(r_rev)
             @test a_rev.kind === KIND_UNIFORM_STEP
             for x in (-1.0, 0.0, 2.7, 5.0, 10.5)
-                @test search_last(a_rev, r_rev, x; order = Base.Order.Reverse) ==
+                @test searchsorted_last(a_rev, r_rev, x; order = Base.Order.Reverse) ==
                     searchsortedlast(r_rev, x, Base.Order.Reverse)
-                @test search_first(a_rev, r_rev, x; order = Base.Order.Reverse) ==
+                @test searchsorted_first(a_rev, r_rev, x; order = Base.Order.Reverse) ==
                     searchsortedfirst(r_rev, x, Base.Order.Reverse)
             end
 
@@ -716,7 +716,7 @@ end
             a_p = Auto(p)
             @test a_p.kind === KIND_UNIFORM_STEP
             for x in (0.0, 1.7, 5.0, 9.9, 10.0)
-                @test search_last(a_p, 0.0:0.5:10.0, x) ==
+                @test searchsorted_last(a_p, 0.0:0.5:10.0, x) ==
                     searchsortedlast(0.0:0.5:10.0, x)
             end
 
@@ -728,9 +728,9 @@ end
             @test a_sent.kind === KIND_UNIFORM_STEP
             @test !a_sent.props.has_props
             for x in (-1.0, 0.0, 1.7, 5.0, 10.0, 11.0)
-                @test search_last(a_sent, 0.0:0.5:10.0, x) ==
+                @test searchsorted_last(a_sent, 0.0:0.5:10.0, x) ==
                     searchsortedlast(0.0:0.5:10.0, x)
-                @test search_first(a_sent, 0.0:0.5:10.0, x) ==
+                @test searchsorted_first(a_sent, 0.0:0.5:10.0, x) ==
                     searchsortedfirst(0.0:0.5:10.0, x)
             end
 
@@ -751,9 +751,9 @@ end
             a_trick = Auto(p_forced)
             @test a_trick.kind === KIND_UNIFORM_STEP
             for x in (54.0, 54.5, 55.1875, 0.5, 101.0, 60.0)
-                @test search_last(a_trick, v_trick, x) ==
+                @test searchsorted_last(a_trick, v_trick, x) ==
                     searchsortedlast(v_trick, x)
-                @test search_first(a_trick, v_trick, x) ==
+                @test searchsorted_first(a_trick, v_trick, x) ==
                     searchsortedfirst(v_trick, x)
             end
 
@@ -763,8 +763,8 @@ end
             a_u = Auto(v_u)
             @test a_u.kind === KIND_UNIFORM_STEP
             for x in (1.0e300, -1.0e300, floatmax(Float64), -floatmax(Float64))
-                @test search_last(a_u, v_u, x) == searchsortedlast(v_u, x)
-                @test search_first(a_u, v_u, x) == searchsortedfirst(v_u, x)
+                @test searchsorted_last(a_u, v_u, x) == searchsortedlast(v_u, x)
+                @test searchsorted_first(a_u, v_u, x) == searchsortedfirst(v_u, x)
             end
 
             # Caller-supplied is_uniform = true on a zero-span vector makes
@@ -774,8 +774,8 @@ end
             p_c = SearchProperties(c; is_uniform = true)
             a_c = Auto(p_c)
             for x in (5.0, 4.0, 6.0)
-                @test search_last(a_c, c, x) == searchsortedlast(c, x)
-                @test search_first(a_c, c, x) == searchsortedfirst(c, x)
+                @test searchsorted_last(a_c, c, x) == searchsortedlast(c, x)
+                @test searchsorted_first(a_c, c, x) == searchsortedfirst(c, x)
             end
 
             # Reverse-ordered uniform Vector through the props kernel.
@@ -784,9 +784,9 @@ end
             @test p_rev.is_uniform
             a_vrev = Auto(p_rev)
             for x in (50.5, 1.0, 100.0, 1.0e300, -3.0)
-                @test search_last(a_vrev, v_rev, x; order = Base.Order.Reverse) ==
+                @test searchsorted_last(a_vrev, v_rev, x; order = Base.Order.Reverse) ==
                     searchsortedlast(v_rev, x, Base.Order.Reverse)
-                @test search_first(a_vrev, v_rev, x; order = Base.Order.Reverse) ==
+                @test searchsorted_first(a_vrev, v_rev, x; order = Base.Order.Reverse) ==
                     searchsortedfirst(v_rev, x, Base.Order.Reverse)
             end
         end
@@ -967,9 +967,9 @@ end
                     v = sort!(rand(rng, Int64(-1000):Int64(1000), n))
                     x = rand(rng, Int64(-1100):Int64(1100))
                     hint = rand(rng, 1:n)
-                    @test search_last(F.SIMDLinearScan(), v, x, hint) ==
+                    @test searchsorted_last(F.SIMDLinearScan(), v, x, hint) ==
                         searchsortedlast(v, x)
-                    @test search_first(F.SIMDLinearScan(), v, x, hint) ==
+                    @test searchsorted_first(F.SIMDLinearScan(), v, x, hint) ==
                         searchsortedfirst(v, x)
                 end
             end
@@ -981,9 +981,9 @@ end
                     v = sort!(randn(rng, n))
                     x = (rand(rng) - 0.5) * 6
                     hint = rand(rng, 1:n)
-                    @test search_last(F.SIMDLinearScan(), v, x, hint) ==
+                    @test searchsorted_last(F.SIMDLinearScan(), v, x, hint) ==
                         searchsortedlast(v, x)
-                    @test search_first(F.SIMDLinearScan(), v, x, hint) ==
+                    @test searchsorted_first(F.SIMDLinearScan(), v, x, hint) ==
                         searchsortedfirst(v, x)
                 end
             end
@@ -991,24 +991,24 @@ end
             @testset "Edge cases (Int64)" begin
                 v = collect(Int64, 1:100)
                 # Out-of-range hint is clamped.
-                @test search_last(F.SIMDLinearScan(), v, Int64(50), -5) == 50
-                @test search_last(F.SIMDLinearScan(), v, Int64(50), 1_000) == 50
+                @test searchsorted_last(F.SIMDLinearScan(), v, Int64(50), -5) == 50
+                @test searchsorted_last(F.SIMDLinearScan(), v, Int64(50), 1_000) == 50
                 # x below/above the range.
-                @test search_last(F.SIMDLinearScan(), v, Int64(-10), 50) == 0
-                @test search_last(F.SIMDLinearScan(), v, Int64(1_000), 50) == 100
-                @test search_first(F.SIMDLinearScan(), v, Int64(-10), 50) == 1
-                @test search_first(F.SIMDLinearScan(), v, Int64(1_000), 50) == 101
+                @test searchsorted_last(F.SIMDLinearScan(), v, Int64(-10), 50) == 0
+                @test searchsorted_last(F.SIMDLinearScan(), v, Int64(1_000), 50) == 100
+                @test searchsorted_first(F.SIMDLinearScan(), v, Int64(-10), 50) == 1
+                @test searchsorted_first(F.SIMDLinearScan(), v, Int64(1_000), 50) == 101
                 # Empty and single-element vectors.
                 vempty = Int64[]
-                @test search_last(F.SIMDLinearScan(), vempty, Int64(5), 1) == 0
-                @test search_first(F.SIMDLinearScan(), vempty, Int64(5), 1) == 1
+                @test searchsorted_last(F.SIMDLinearScan(), vempty, Int64(5), 1) == 0
+                @test searchsorted_first(F.SIMDLinearScan(), vempty, Int64(5), 1) == 1
                 v1 = Int64[42]
-                @test search_last(F.SIMDLinearScan(), v1, Int64(42), 1) == 1
-                @test search_first(F.SIMDLinearScan(), v1, Int64(42), 1) == 1
+                @test searchsorted_last(F.SIMDLinearScan(), v1, Int64(42), 1) == 1
+                @test searchsorted_first(F.SIMDLinearScan(), v1, Int64(42), 1) == 1
                 # Duplicates.
                 vd = Int64[1, 2, 2, 2, 5]
-                @test search_last(F.SIMDLinearScan(), vd, Int64(2), 1) == 4
-                @test search_first(F.SIMDLinearScan(), vd, Int64(2), 5) == 2
+                @test searchsorted_last(F.SIMDLinearScan(), vd, Int64(2), 1) == 4
+                @test searchsorted_first(F.SIMDLinearScan(), vd, Int64(2), 5) == 2
             end
 
             @testset "Fallback: non-Int64/Float64 eltypes" begin
@@ -1017,32 +1017,32 @@ end
                 v32 = Int32[1, 5, 10, 20, 50, 100, 200]
                 for x in (Int32(0), Int32(7), Int32(20), Int32(300))
                     for hint in 1:length(v32)
-                        @test search_last(F.SIMDLinearScan(), v32, x, hint) ==
+                        @test searchsorted_last(F.SIMDLinearScan(), v32, x, hint) ==
                             searchsortedlast(v32, x)
-                        @test search_first(F.SIMDLinearScan(), v32, x, hint) ==
+                        @test searchsorted_first(F.SIMDLinearScan(), v32, x, hint) ==
                             searchsortedfirst(v32, x)
                     end
                 end
                 # Float32 same.
                 v32f = Float32[1.0, 5.0, 10.0, 20.0, 50.0]
                 for x in (Float32(0.0), Float32(7.0), Float32(20.0), Float32(100.0))
-                    @test search_last(F.SIMDLinearScan(), v32f, x, 2) ==
+                    @test searchsorted_last(F.SIMDLinearScan(), v32f, x, 2) ==
                         searchsortedlast(v32f, x)
                 end
                 # Non-numeric.
                 vs = sort!(["alpha", "beta", "gamma", "delta", "epsilon"])
-                @test search_last(F.SIMDLinearScan(), vs, "gamma", 2) ==
+                @test searchsorted_last(F.SIMDLinearScan(), vs, "gamma", 2) ==
                     searchsortedlast(vs, "gamma")
             end
 
             @testset "Fallback: no hint, reverse order" begin
                 v = collect(Int64, 1:100)
                 # No hint → BinaryBracket.
-                @test search_last(F.SIMDLinearScan(), v, Int64(50)) ==
+                @test searchsorted_last(F.SIMDLinearScan(), v, Int64(50)) ==
                     searchsortedlast(v, Int64(50))
                 # Reverse order → scalar LinearScan.
                 v_rev = collect(Int64, 100:-1:1)
-                @test search_last(
+                @test searchsorted_last(
                     F.SIMDLinearScan(), v_rev, Int64(50), 1; order = Base.Order.Reverse
                 ) == searchsortedlast(v_rev, Int64(50), Base.Order.Reverse)
             end
@@ -1154,16 +1154,16 @@ end
                 # When used with searchsortedfirst/last, BisectThenSIMD just
                 # delegates to BinaryBracket — its purpose is findequal.
                 v = collect(Int64, 1:100)
-                @test search_first(F.BisectThenSIMD(), v, Int64(50)) ==
+                @test searchsorted_first(F.BisectThenSIMD(), v, Int64(50)) ==
                     searchsortedfirst(v, Int64(50))
-                @test search_last(F.BisectThenSIMD(), v, Int64(50)) ==
+                @test searchsorted_last(F.BisectThenSIMD(), v, Int64(50)) ==
                     searchsortedlast(v, Int64(50))
             end
         end
 
         @safetestset "Enum-tagged dispatch (v3 API)" begin
             using FindFirstFunctions
-            using FindFirstFunctions: search_last, search_first, strategy_kind
+            using FindFirstFunctions: searchsorted_last, searchsorted_first, strategy_kind
             using StableRNGs
 
             # Mapping from struct → kind, and kind enum value coverage.
@@ -1179,7 +1179,7 @@ end
                 @test strategy_kind(BisectThenSIMD()) === KIND_BISECT_THEN_SIMD
             end
 
-            @testset "Per-kind search_last parity vs Base" begin
+            @testset "Per-kind searchsorted_last parity vs Base" begin
                 # Each hint-using kind should match Base when given a valid
                 # in-range hint. Hint-ignoring kinds (BinaryBracket,
                 # InterpolationSearch, UniformStep, BisectThenSIMD) match
@@ -1193,14 +1193,14 @@ end
                             KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
                             KIND_INTERPOLATION_SEARCH,
                         )
-                        @test search_last(kind, v, x, h) == want_last
-                        @test search_first(kind, v, x, h) == want_first
+                        @test searchsorted_last(kind, v, x, h) == want_last
+                        @test searchsorted_first(kind, v, x, h) == want_first
                     end
                     # No-hint forms.
-                    @test search_last(KIND_BINARY_BRACKET, v, x) == want_last
-                    @test search_first(KIND_BINARY_BRACKET, v, x) == want_first
-                    @test search_last(KIND_INTERPOLATION_SEARCH, v, x) == want_last
-                    @test search_first(KIND_INTERPOLATION_SEARCH, v, x) == want_first
+                    @test searchsorted_last(KIND_BINARY_BRACKET, v, x) == want_last
+                    @test searchsorted_first(KIND_BINARY_BRACKET, v, x) == want_first
+                    @test searchsorted_last(KIND_INTERPOLATION_SEARCH, v, x) == want_last
+                    @test searchsorted_first(KIND_INTERPOLATION_SEARCH, v, x) == want_first
                 end
             end
 
@@ -1217,8 +1217,8 @@ end
                             KIND_SIMD_LINEAR_SCAN, KIND_BRACKET_GALLOP,
                             KIND_EXP_FROM_LEFT, KIND_INTERPOLATION_SEARCH,
                         )
-                        @test search_last(kind, v, x, h) == want_last
-                        @test search_first(kind, v, x, h) == want_first
+                        @test searchsorted_last(kind, v, x, h) == want_last
+                        @test searchsorted_first(kind, v, x, h) == want_first
                     end
                 end
             end
@@ -1231,17 +1231,17 @@ end
                     h = rand(rng, 1:length(v))
                     want_last = searchsortedlast(v, x)
                     want_first = searchsortedfirst(v, x)
-                    @test search_last(KIND_SIMD_LINEAR_SCAN, v, x, h) == want_last
-                    @test search_first(KIND_SIMD_LINEAR_SCAN, v, x, h) == want_first
+                    @test searchsorted_last(KIND_SIMD_LINEAR_SCAN, v, x, h) == want_last
+                    @test searchsorted_first(KIND_SIMD_LINEAR_SCAN, v, x, h) == want_first
                 end
             end
 
             @testset "UniformStep kind on AbstractRange" begin
                 for r in (1:100, 0.0:0.1:10.0, LinRange(0.0, 10.0, 101))
                     for x in (first(r) - 1, first(r), last(r), last(r) + 1)
-                        @test search_last(KIND_UNIFORM_STEP, r, x) ==
+                        @test searchsorted_last(KIND_UNIFORM_STEP, r, x) ==
                             searchsortedlast(r, x)
-                        @test search_first(KIND_UNIFORM_STEP, r, x) ==
+                        @test searchsorted_first(KIND_UNIFORM_STEP, r, x) ==
                             searchsortedfirst(r, x)
                     end
                 end
@@ -1252,9 +1252,9 @@ end
                 rng = StableRNG(7003)
                 for _ in 1:100
                     x = exp(rand(rng) * log(1.0e6))
-                    @test search_last(KIND_BIT_INTERPOLATION_SEARCH, v, x) ==
+                    @test searchsorted_last(KIND_BIT_INTERPOLATION_SEARCH, v, x) ==
                         searchsortedlast(v, x)
-                    @test search_first(KIND_BIT_INTERPOLATION_SEARCH, v, x) ==
+                    @test searchsorted_first(KIND_BIT_INTERPOLATION_SEARCH, v, x) ==
                         searchsortedfirst(v, x)
                 end
             end
@@ -1267,9 +1267,9 @@ end
                         KIND_INTERPOLATION_SEARCH,
                     )
                     for x in (0.5, 1.0, 5.0, 10.0, 11.0), h in (1, 5, 10)
-                        @test search_last(kind, v, x, h; order = Base.Order.Reverse) ==
+                        @test searchsorted_last(kind, v, x, h; order = Base.Order.Reverse) ==
                             searchsortedlast(v, x, Base.Order.Reverse)
-                        @test search_first(kind, v, x, h; order = Base.Order.Reverse) ==
+                        @test searchsorted_first(kind, v, x, h; order = Base.Order.Reverse) ==
                             searchsortedfirst(v, x, Base.Order.Reverse)
                     end
                 end
@@ -1287,10 +1287,10 @@ end
                 @test isbits(a)
                 @test @inferred(Auto(v)) isa Auto
                 @test @inferred(Auto(SearchProperties(v))) isa Auto
-                # `search_last(::Auto, ...)` is concretely Int-returning.
-                @test @inferred(search_last(a, v, 50, 1)) === 50
-                @test @inferred(search_first(a, v, 50, 1)) === 50
-                @test @inferred(search_last(a, v, 50)) === 50
+                # `searchsorted_last(::Auto, ...)` is concretely Int-returning.
+                @test @inferred(searchsorted_last(a, v, 50, 1)) === 50
+                @test @inferred(searchsorted_first(a, v, 50, 1)) === 50
+                @test @inferred(searchsorted_last(a, v, 50)) === 50
             end
 
             @testset "Vector{Auto{T}} has concrete eltype" begin
@@ -1313,8 +1313,8 @@ end
             end
 
             @testset "Struct form forwards through strategy_kind" begin
-                # `search_last(::S, v, x[, hint])` forwards through
-                # `strategy_kind(S())` to `search_last(KIND_X, ...)`.
+                # `searchsorted_last(::S, v, x[, hint])` forwards through
+                # `strategy_kind(S())` to `searchsorted_last(KIND_X, ...)`.
                 # Verify both forms produce identical answers.
                 v = collect(1:1000)
                 rng = StableRNG(7004)
@@ -1329,10 +1329,10 @@ end
                     for _ in 1:50
                         x = rand(rng, 1:1000)
                         h = rand(rng, 1:1000)
-                        @test search_last(s, v, x, h) ==
-                            search_last(kind, v, x, h)
-                        @test search_first(s, v, x, h) ==
-                            search_first(kind, v, x, h)
+                        @test searchsorted_last(s, v, x, h) ==
+                            searchsorted_last(kind, v, x, h)
+                        @test searchsorted_first(s, v, x, h) ==
+                            searchsorted_first(kind, v, x, h)
                     end
                 end
             end
@@ -1342,8 +1342,8 @@ end
                 v = collect(LinRange(0, 10, 100))
                 g = Guesser(v)
                 gh = GuesserHint(g)
-                @test search_last(gh, v, 4.0) == searchsortedlast(v, 4.0)
-                @test search_first(gh, v, 4.0) == searchsortedfirst(v, 4.0)
+                @test searchsorted_last(gh, v, 4.0) == searchsortedlast(v, 4.0)
+                @test searchsorted_first(gh, v, 4.0) == searchsortedfirst(v, 4.0)
                 # strategy_kind on a GuesserHint must error — it has no tag.
                 @test_throws ArgumentError strategy_kind(gh)
             end

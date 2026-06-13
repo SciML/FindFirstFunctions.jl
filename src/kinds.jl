@@ -1,7 +1,7 @@
 # Enum-tagged dispatch for singleton search strategies.
 #
 # Each value of `StrategyKind` names one of the singleton, zero-state
-# strategies. The pair `search_last` / `search_first` is the single public
+# strategies. The pair `searchsorted_last` / `searchsorted_first` is the single public
 # entry point: a runtime-tag dispatcher that branches on the enum and
 # inlines into the matching kernel function (defined in `kernels.jl`).
 #
@@ -15,17 +15,17 @@
 # Stateful strategies (`GuesserHint(::Guesser)`) do *not* live in the enum.
 # They carry per-instance data, so a singleton tag would lose information.
 # Instead they dispatch directly via their wrapper struct
-# (`search_last(::GuesserHint, ...)`).
+# (`searchsorted_last(::GuesserHint, ...)`).
 
 """
     StrategyKind
 
 Enum tag identifying a singleton search strategy. Use values of this
-enum as the first positional argument to [`search_last`](@ref) and
-[`search_first`](@ref):
+enum as the first positional argument to [`searchsorted_last`](@ref) and
+[`searchsorted_first`](@ref):
 
 ```julia
-search_last(KIND_BRACKET_GALLOP, v, x, hint)
+searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)
 ```
 
 Each tag corresponds to one of the singleton strategy types
@@ -50,8 +50,8 @@ that carries it.
 end
 
 """
-    search_last(kind::StrategyKind, v, x[, hint]; order = Base.Order.Forward)
-    search_last(s, v, x[, hint]; order = Base.Order.Forward)
+    searchsorted_last(kind::StrategyKind, v, x[, hint]; order = Base.Order.Forward)
+    searchsorted_last(s, v, x[, hint]; order = Base.Order.Forward)
 
 FFF-owned positional search for the largest index `i` with `v[i] ≤ x`
 under `order` (or `v[i] ≥ x` under `Base.Order.Reverse`). The polarity
@@ -61,46 +61,46 @@ When the first argument is a [`StrategyKind`](@ref) value the call
 dispatches via a runtime `if/elseif` branch on the enum into the matching
 kernel. When the first argument is a stateful strategy wrapper (`Auto`,
 `GuesserHint`) the call dispatches via multimethod into that wrapper's
-own `search_last` method.
+own `searchsorted_last` method.
 
 This is the only search entry point: as of v3, FindFirstFunctions no
 longer extends `Base.searchsortedlast` / `Base.searchsortedfirst` with
 strategy methods.
 """
-@inline function search_last(
+@inline function searchsorted_last(
         kind::StrategyKind, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return _search_last_nohint(kind, v, x, order)
+    return _searchsorted_last_nohint(kind, v, x, order)
 end
 
-@inline function search_last(
+@inline function searchsorted_last(
         kind::StrategyKind, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return _search_last_hinted(kind, v, x, hint, order)
+    return _searchsorted_last_hinted(kind, v, x, hint, order)
 end
 
 """
-    search_first(kind::StrategyKind, v, x[, hint]; order = Base.Order.Forward)
-    search_first(s, v, x[, hint]; order = Base.Order.Forward)
+    searchsorted_first(kind::StrategyKind, v, x[, hint]; order = Base.Order.Forward)
+    searchsorted_first(s, v, x[, hint]; order = Base.Order.Forward)
 
 FFF-owned positional search for the smallest index `i` with `v[i] ≥ x`
 under `order` (or `v[i] ≤ x` under `Base.Order.Reverse`). See
-[`search_last`](@ref) for the dispatch story.
+[`searchsorted_last`](@ref) for the dispatch story.
 """
-@inline function search_first(
+@inline function searchsorted_first(
         kind::StrategyKind, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return _search_first_nohint(kind, v, x, order)
+    return _searchsorted_first_nohint(kind, v, x, order)
 end
 
-@inline function search_first(
+@inline function searchsorted_first(
         kind::StrategyKind, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    return _search_first_hinted(kind, v, x, hint, order)
+    return _searchsorted_first_hinted(kind, v, x, hint, order)
 end
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ end
 # discard the hint.
 # ---------------------------------------------------------------------------
 
-@inline function _search_last_hinted(
+@inline function _searchsorted_last_hinted(
         kind::StrategyKind, v::AbstractVector, x, hint::Integer,
         order::Base.Order.Ordering,
     )
@@ -143,7 +143,7 @@ end
     end
 end
 
-@inline function _search_last_nohint(
+@inline function _searchsorted_last_nohint(
         kind::StrategyKind, v::AbstractVector, x,
         order::Base.Order.Ordering,
     )
@@ -169,7 +169,7 @@ end
     end
 end
 
-@inline function _search_first_hinted(
+@inline function _searchsorted_first_hinted(
         kind::StrategyKind, v::AbstractVector, x, hint::Integer,
         order::Base.Order.Ordering,
     )
@@ -194,7 +194,7 @@ end
     end
 end
 
-@inline function _search_first_nohint(
+@inline function _searchsorted_first_nohint(
         kind::StrategyKind, v::AbstractVector, x,
         order::Base.Order.Ordering,
     )
@@ -221,7 +221,7 @@ end
 
 # ---------------------------------------------------------------------------
 # Per-strategy kind lookup. Methods live in `strategy_kind.jl`; used by
-# the struct-valued `search_last` / `search_first` entry points and by
+# the struct-valued `searchsorted_last` / `searchsorted_first` entry points and by
 # callers that need to convert a strategy struct to its enum tag.
 # ---------------------------------------------------------------------------
 

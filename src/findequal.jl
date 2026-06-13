@@ -2,7 +2,7 @@
 # Returns an `Int` with the sentinel `firstindex(v) - 1` for "not found"
 # (matching `Base.searchsortedlast`'s convention).
 #
-# Most strategies compose: run `search_first(strategy, v, x[, hint])` to
+# Most strategies compose: run `searchsorted_first(strategy, v, x[, hint])` to
 # find the candidate insertion point, then post-check whether `v[i] == x`.
 # The `BisectThenSIMD` shortcut for `DenseVector{Int64}` dispatches into
 # `findfirstsortedequal` directly.
@@ -40,20 +40,20 @@ end
         strategy::SearchStrategy, v::AbstractVector, x, hint::Integer;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    i = search_first(strategy, v, x, hint; order = order)
+    i = searchsorted_first(strategy, v, x, hint; order = order)
     return _findequal_postcheck(v, x, i)
 end
 
 # Enum-tagged form. `KIND_BISECT_THEN_SIMD` forwards to the struct form so
 # the `DenseVector{Int64}` bisect-then-SIMD shortcut is reached — the
-# generic `search_first` path would silently lose it.
+# generic `searchsorted_first` path would silently lose it.
 @inline function findequal(
         kind::StrategyKind, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     kind === KIND_BISECT_THEN_SIMD &&
         return findequal(BisectThenSIMD(), v, x; order = order)
-    i = search_first(kind, v, x; order = order)
+    i = searchsorted_first(kind, v, x; order = order)
     return _findequal_postcheck(v, x, i)
 end
 
@@ -63,12 +63,12 @@ end
     )
     kind === KIND_BISECT_THEN_SIMD &&
         return findequal(BisectThenSIMD(), v, x, hint; order = order)
-    i = search_first(kind, v, x, hint; order = order)
+    i = searchsorted_first(kind, v, x, hint; order = order)
     return _findequal_postcheck(v, x, i)
 end
 
 @inline function _findequal_generic_strategy(strategy, v, x, order)
-    i = search_first(strategy, v, x; order = order)
+    i = searchsorted_first(strategy, v, x; order = order)
     return _findequal_postcheck(v, x, i)
 end
 
@@ -86,7 +86,7 @@ function findequal(
         order::Base.Order.Ordering = Base.Order.Forward,
     )
     if order !== Base.Order.Forward
-        return _findequal_postcheck(v, x, search_first(KIND_BINARY_BRACKET, v, x; order = order))
+        return _findequal_postcheck(v, x, searchsorted_first(KIND_BINARY_BRACKET, v, x; order = order))
     end
     r = findfirstsortedequal(x, v)
     return r === nothing ? (firstindex(v) - 1) : r
@@ -101,7 +101,7 @@ function findequal(
         ::BisectThenSIMD, v::AbstractVector, x;
         order::Base.Order.Ordering = Base.Order.Forward,
     )
-    i = search_first(KIND_BINARY_BRACKET, v, x; order = order)
+    i = searchsorted_first(KIND_BINARY_BRACKET, v, x; order = order)
     return _findequal_postcheck(v, x, i)
 end
 findequal(

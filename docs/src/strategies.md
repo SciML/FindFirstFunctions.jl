@@ -5,13 +5,13 @@ ways to select a strategy:
 
   - **v3 preferred:** pass a [`StrategyKind`](@ref FindFirstFunctions.StrategyKind)
     enum value (e.g. `KIND_BRACKET_GALLOP`) as the first argument to
-    [`search_last`](@ref FindFirstFunctions.search_last) /
-    [`search_first`](@ref FindFirstFunctions.search_first). One enum
+    [`searchsorted_last`](@ref FindFirstFunctions.searchsorted_last) /
+    [`searchsorted_first`](@ref FindFirstFunctions.searchsorted_first). One enum
     value per singleton strategy; runtime `if/elseif` dispatch into the
     matching kernel; ~0 ns of overhead in hot loops; the inferred return
     type is concrete regardless of which kind is picked at runtime.
   - **Struct form:** pass a singleton strategy struct (e.g.
-    `BracketGallop()`) to the same `search_last` / `search_first`. The
+    `BracketGallop()`) to the same `searchsorted_last` / `searchsorted_first`. The
     struct forwards through
     [`strategy_kind`](@ref FindFirstFunctions.strategy_kind), which
     constant-folds for a literal strategy argument — the struct form
@@ -28,8 +28,8 @@ via their own multimethods.
 ```@docs
 FindFirstFunctions.SearchStrategy
 FindFirstFunctions.StrategyKind
-FindFirstFunctions.search_last
-FindFirstFunctions.search_first
+FindFirstFunctions.searchsorted_last
+FindFirstFunctions.searchsorted_first
 FindFirstFunctions.strategy_kind
 ```
 
@@ -52,13 +52,13 @@ multimethod path:
 
   - [`Auto`](@ref FindFirstFunctions.Auto): carries a `StrategyKind` field
     plus a [`SearchProperties`](@ref FindFirstFunctions.SearchProperties)
-    cache. `Auto`'s `search_last` is a one-line forward to the stored
+    cache. `Auto`'s `searchsorted_last` is a one-line forward to the stored
     kind; the batched dispatch re-resolves the kind from
     `(v, queries)` because the gap heuristic needs the queries.
   - [`GuesserHint`](@ref FindFirstFunctions.GuesserHint): carries a
     [`Guesser`](@ref FindFirstFunctions.Guesser) (with its `idx_prev::Ref{Int}`
     and `linear_lookup::Bool`). Dispatches via its own
-    `search_last(::GuesserHint, ...)` / `search_first(::GuesserHint, ...)`
+    `searchsorted_last(::GuesserHint, ...)` / `searchsorted_first(::GuesserHint, ...)`
     methods.
 
 ## When to pick which
@@ -88,7 +88,7 @@ falls back to `BinaryBracket` for non-numeric element types.
 
 The v2 `Base.searchsortedlast(::S, ...)` / `Base.searchsortedfirst(::S, ...)`
 methods are removed in v3. The migration is a mechanical rename —
-`searchsortedlast` → `search_last`, `searchsortedfirst` → `search_first` —
+`searchsortedlast` → `searchsorted_last`, `searchsortedfirst` → `searchsorted_first` —
 with the strategy argument unchanged:
 
 ```julia
@@ -99,14 +99,14 @@ searchsortedlast(Auto(v), v, x, hint)
 searchsortedfirst(GuesserHint(g), v, x)
 
 # v3
-search_last(BracketGallop(), v, x, hint)
-search_first(InterpolationSearch(), v, x)
-search_last(Auto(v), v, x, hint)
-search_first(GuesserHint(g), v, x)
+searchsorted_last(BracketGallop(), v, x, hint)
+searchsorted_first(InterpolationSearch(), v, x)
+searchsorted_last(Auto(v), v, x, hint)
+searchsorted_first(GuesserHint(g), v, x)
 ```
 
 Hot loops that pick the strategy from runtime data should use the
-`StrategyKind` enum form (`search_last(KIND_BRACKET_GALLOP, v, x, hint)`);
+`StrategyKind` enum form (`searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)`);
 for a literal singleton strategy the struct form compiles to exactly the
 same code.
 
@@ -146,7 +146,7 @@ The sentinel for "not found" is `firstindex(v) - 1` (`= 0` for 1-based
 vectors). Type-stable `Int` return, no `Union` with `Nothing`. Callers can
 test for absence with `i < firstindex(v)`.
 
-`findequal` routes most strategies through `search_first + post-check`
+`findequal` routes most strategies through `searchsorted_first + post-check`
 generically, so `findequal(BracketGallop(), v, x, hint)`,
 `findequal(SIMDLinearScan(), v, x, hint)`,
 `findequal(GuesserHint(g), v, x)`, `findequal(KIND_BRACKET_GALLOP, v, x, hint)`,
@@ -267,8 +267,8 @@ cache:
     otherwise.
   - `Auto(v, props)` is the same with a pre-computed `props` cache.
 
-The per-query `search_last(::Auto, v, x, hint)` is a one-line forward to
-`search_last(s.kind, v, x, hint)`. The batched
+The per-query `searchsorted_last(::Auto, v, x, hint)` is a one-line forward to
+`searchsorted_last(s.kind, v, x, hint)`. The batched
 `searchsortedlast!(out, v, queries; strategy = Auto())` re-resolves the
 kind from `(v, queries)` to consult the gap heuristic.
 

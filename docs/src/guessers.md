@@ -72,7 +72,7 @@ v = collect(0.0:0.1:10.0)
 g = Guesser(v)
 strat = GuesserHint(g)
 
-i = search_last(strat, v, 3.14)
+i = searchsorted_last(strat, v, 3.14)
 @assert g.idx_prev[] == i   # the guesser caches the last result
 ```
 
@@ -93,7 +93,7 @@ end
 Interp(v) = Interp(v, Guesser(v))
 
 function find_segment(itp::Interp, x)
-    return search_last(GuesserHint(itp.g), itp.v, x)
+    return searchsorted_last(GuesserHint(itp.g), itp.v, x)
 end
 ```
 
