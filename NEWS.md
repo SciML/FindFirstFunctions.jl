@@ -1,5 +1,161 @@
 # FindFirstFunctions.jl NEWS
 
+## 3.0.0
+
+The 2.x sorted-search API was a single generic
+`Base.searchsortedlast(::SearchStrategy, v, x[, hint])` /
+`Base.searchsortedfirst(::SearchStrategy, ...)` extended once per
+concrete strategy struct. That design made dispatch type-stable on the
+*chosen* strategy but produced `Union` returns whenever the strategy
+itself depended on runtime data — in particular `Auto`'s decision tree,
+where the strategy struct returned by `_auto_pick(v, hint)` had a
+runtime-dependent type, broke `@inferred`, and gave `Vector{Auto}`-style
+containers a `Union` element type.
+
+The 3.0 redesign replaces the multimethod dispatch on `SearchStrategy`
+singletons with a single FFF-owned dispatcher tagged by an enum:
+
+```julia
+searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)
+searchsorted_first(KIND_INTERPOLATION_SEARCH, v, x)
+```
+
+The runtime `if/elseif` over `StrategyKind` values is well-predicted in
+hot loops, the kernel bodies inline, and the return path stays concrete
+(`Int`) regardless of which kind is picked at runtime. A benchmark sweep
+across 20 representative cells measured ~0 ns of overhead vs. the v2
+multimethod path.
+
+### Breaking: the `Base.searchsortedlast(::S, ...)` API is removed
+
+v3 no longer extends `Base.searchsortedlast` / `Base.searchsortedfirst`
+with strategy methods. The FFF-owned `searchsorted_last` / `searchsorted_first`
+dispatchers are the only search entry points; they accept a
+`StrategyKind` tag, a strategy struct (which forwards through
+[`strategy_kind`] and constant-folds for literal strategies), or a
+stateful strategy (`Auto`, `GuesserHint`):
+
+| v2 (removed) | v3 |
+|---|---|
+| `searchsortedlast(BracketGallop(), v, x, hint)` | `searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)` or `searchsorted_last(BracketGallop(), v, x, hint)` |
+| `searchsortedfirst(InterpolationSearch(), v, x)` | `searchsorted_first(KIND_INTERPOLATION_SEARCH, v, x)` or `searchsorted_first(InterpolationSearch(), v, x)` |
+| `searchsortedlast(UniformStep(), r, x)` | `searchsorted_last(KIND_UNIFORM_STEP, r, x)` or `searchsorted_last(UniformStep(), r, x)` |
+| `searchsortedlast(Auto(v), v, x, hint)` | `searchsorted_last(Auto(v), v, x, hint)` |
+| `searchsortedfirst(GuesserHint(g), v, x)` | `searchsorted_first(GuesserHint(g), v, x)` |
+
+(The same rename applies to every other singleton strategy.) The batched
+in-place API (`searchsortedlast!` / `searchsortedfirst!` /
+`searchsortedrange`) is FFF-owned and unchanged.
+
+Stateful strategies (`Auto`, `GuesserHint`) stay on the multimethod path
+because they carry per-instance data.
+
+### Breaking changes — `Auto` resolves at construction
+
+In v2, `Auto()`'s per-query `Base.searchsortedlast(::Auto, v, x, hint)`
+ran the picking logic on every call (consulting `length(v)`, hint
+validity, and `props.is_uniform`). In v3, `Auto` carries a resolved
+`StrategyKind` and per-query dispatch is a one-line forward to
+`searchsorted_last(s.kind, v, x, hint)`:
+
+  - `Auto()` defaults to `KIND_BINARY_BRACKET` (safe; matches
+    `Base.searchsortedlast` exactly).
+  - `Auto(v)` resolves the kind from `length(v)` + `SearchProperties(v)`.
+    Pre-pay the probe cost once, get the v2 fast-path on every per-query
+    call afterwards.
+  - `Auto(v, props)` is the same with a pre-computed `props` cache.
+
+The **batched** Auto dispatch (`searchsortedlast!(out, v, queries;
+strategy = Auto())`) still re-resolves the kind from `(v, queries)`
+because the gap heuristic needs the queries; that decision tree is
+type-stable in v3 (returns a `StrategyKind`, dispatched via the enum
+switch into a kind-parameterized loop).
+
+The v2 behaviour of `Auto()` re-picking on every per-query call is
+preserved for batched calls and for callers that explicitly construct
+`Auto(v)` per query. For callers that previously relied on `Auto()` (no
+`v`) picking `LinearScan` on short vectors or `BracketGallop` on long
+vectors per-query, update to `Auto(v)` where `v` is known.
+
+### New: parametric `SearchProperties{T}` with precomputed `inv_step`
+
+`SearchProperties` is now parametric on the data ratio type
+`T = typeof(oneunit(eltype(v)) / oneunit(eltype(v)))` (`Float64` for
+`Vector{Int}` or `Vector{Float64}`, `Float32` for `Vector{Float32}`, etc.).
+The struct carries two new fields:
+
+  - `first_val::T` — `v[1]` (or `first(r)` for an `AbstractRange`).
+  - `inv_step::T` — the precomputed reciprocal `1 / step`. For an
+    `AbstractRange`, `1 / step(r)`. For an exactly-uniform `AbstractVector`,
+    `(length(v) - 1) / (v[end] - v[1])`.
+
+These fields are populated when `is_uniform = true` and zero otherwise.
+
+For `AbstractVector` data, `is_uniform` is detected by the cheap 11-point
+sampled pre-filter and then confirmed by an exact O(n) scan over every
+element. The exact pass matters: data that is uniform at the sampled
+points but jittered between them would otherwise be flagged uniform, and
+the closed-form lookup would land in the wrong cell. The kernels also
+carry a correction walk, so even a caller-forced `is_uniform = true` on
+non-uniform data degrades to a slower search rather than a wrong answer.
+
+The populated fields feed the new **props-aware `UniformStep` kernel**
+invoked by `Auto(v)` when the resolved kind is `KIND_UNIFORM_STEP`:
+
+```julia
+# v3 closed-form O(1) lookup with no per-query division:
+a = Auto(0.0:0.5:100.0)           # kind = KIND_UNIFORM_STEP, inv_step = 2.0
+searchsorted_last(a, r, 3.7)            # → floor((3.7 - 0.0) * 2.0) + 1 = 8
+```
+
+This subsumes the never-merged `DirectStep` strategy (PR #74) — its
+precomputed-reciprocal closed-form is now folded into `UniformStep` via
+the `SearchProperties{T}` payload.
+
+The raw `UniformStep()` singleton kept its old behaviour: when called via
+`searchsortedlast(UniformStep(), r, x)` (no props) it still uses
+`fld(diff, step)` per query. Auto routes through the props-aware kernel
+because Auto carries the precomputed `SearchProperties{T}`.
+
+### `Auto{T}` parametric
+
+`Auto` now carries `props::SearchProperties{T}` and is itself parametric
+on `T`. `Auto(v)` returns an `Auto{T}` where `T` is the ratio type of
+`eltype(v)`. Two `Auto`s constructed from data with the same ratio type
+(e.g. `Vector{Int}` and `Vector{Float64}` both → `Auto{Float64}`) share
+a single concrete type, so `Vector{Auto{Float64}}` is concrete.
+
+### New: `strategy_kind`
+
+`strategy_kind(s::SearchStrategy)` maps a singleton strategy struct to
+its `StrategyKind` tag, and returns the stored kind for `Auto`.
+`GuesserHint` (genuinely stateful, no singleton tag) throws
+`ArgumentError`.
+
+### `findequal` now accepts a `StrategyKind` directly
+
+```julia
+findequal(KIND_BRACKET_GALLOP, v, x)
+findequal(KIND_BRACKET_GALLOP, v, x, hint)
+```
+
+In addition to the `findequal(strategy_struct, v, x[, hint])` form,
+which forwards through the same struct → kind mapping.
+
+### Internals — `dispatch.jl` split into `kinds.jl` + `kernels.jl` + `strategy_kind.jl`
+
+The v2 `src/dispatch.jl` file (Base.searchsortedlast extensions per
+strategy) is gone. In its place:
+
+  - `src/kinds.jl` — `StrategyKind` enum and `searchsorted_last` /
+    `searchsorted_first` enum dispatchers.
+  - `src/kernels.jl` — per-strategy kernel functions
+    (`_kernel_last_bracket_gallop`, etc.), lifted out of the v2 method
+    bodies.
+  - `src/strategy_kind.jl` — the struct → kind mapping plus the
+    struct-valued `searchsorted_last(::S, ...)` / `searchsorted_first(::S, ...)`
+    entry points that forward through it.
+
 ## 2.0.0
 
 This is a major rewrite of the sorted-search API. The 1.x surface — a

@@ -10,12 +10,16 @@ script at the end of the page generates the comparison grid.
 
 The decision differs between per-query and batched callers.
 
-### Per-query: `searchsortedlast(Auto(), v, x[, hint])`
+### Per-query: `searchsorted_last(Auto(v), v, x[, hint])`
+
+The kind is resolved once, at construction, and every per-query call
+forwards to it:
 
 ```
-hint missing or out of axes(v)   →  BinaryBracket
-length(v) ≤ 16                   →  LinearScan        # _AUTO_LINEAR_THRESHOLD
-otherwise                        →  BracketGallop
+Auto()  (no data)                            →  KIND_BINARY_BRACKET
+Auto(v) and props.is_uniform                 →  KIND_UNIFORM_STEP   # props-aware closed form
+Auto(v) and length(v) ≤ 16                   →  KIND_LINEAR_SCAN    # _AUTO_LINEAR_THRESHOLD
+Auto(v) otherwise                            →  KIND_BRACKET_GALLOP
 ```
 
 `Auto` never picks `InterpolationSearch` or `ExpFromLeft` in the per-query

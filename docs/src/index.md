@@ -51,7 +51,7 @@ v = collect(0.0:0.1:10.0)
 queries = sort!(rand(100) .* 10)
 
 # Single query with a hint.
-i = searchsortedlast(BracketGallop(), v, 3.14, 30)
+i = searchsorted_last(BracketGallop(), v, 3.14, 30)
 
 # Batched, with strategy chosen by Auto.
 idx = Vector{Int}(undef, length(queries))

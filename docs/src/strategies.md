@@ -1,13 +1,67 @@
 # Search strategies
 
-The strategies form the parameter space of the sorted-search API. Each one
-subtypes [`SearchStrategy`](@ref FindFirstFunctions.SearchStrategy) and is
-selected as the first positional argument of `searchsortedfirst` /
-`searchsortedlast`.
+The strategies form the parameter space of the sorted-search API. The
+entry points are [`searchsorted_last`](@ref FindFirstFunctions.searchsorted_last) /
+[`searchsorted_first`](@ref FindFirstFunctions.searchsorted_first), and a
+strategy can be passed to them two ways:
+
+  - **As a [`StrategyKind`](@ref FindFirstFunctions.StrategyKind) enum
+    value** (e.g. `KIND_BRACKET_GALLOP`). One enum value per singleton
+    strategy; runtime `if/elseif` dispatch into the matching kernel; ~0 ns
+    of overhead in hot loops; the inferred return type is concrete
+    regardless of which kind is picked at runtime. Use this when the
+    strategy is chosen from runtime data.
+  - **As a singleton strategy struct** (e.g. `BracketGallop()`). The
+    struct forwards through
+    [`strategy_kind`](@ref FindFirstFunctions.strategy_kind), which
+    constant-folds for a literal strategy argument — so for a literal
+    strategy the struct form compiles to exactly the same code as the enum
+    form.
+
+FindFirstFunctions does **not** extend `Base.searchsortedlast` /
+`Base.searchsortedfirst`. The v2 API that did is removed in v3; these
+FFF-owned functions are the only search entry points.
+
+The stateful strategies — [`Auto`](@ref FindFirstFunctions.Auto) and
+[`GuesserHint`](@ref FindFirstFunctions.GuesserHint) — carry per-instance
+data and so cannot be expressed as singleton enum tags. They dispatch
+via their own multimethods.
 
 ```@docs
 FindFirstFunctions.SearchStrategy
+FindFirstFunctions.StrategyKind
+FindFirstFunctions.searchsorted_last
+FindFirstFunctions.searchsorted_first
+FindFirstFunctions.strategy_kind
 ```
+
+## Kind ↔ strategy mapping
+
+| Enum tag | Strategy struct | Kernel function |
+|---|---|---|
+| `KIND_BINARY_BRACKET` | `BinaryBracket` | `_kernel_last_binary_bracket` / `_kernel_first_binary_bracket` |
+| `KIND_LINEAR_SCAN` | `LinearScan` | `_kernel_last_linear_scan` / `_kernel_first_linear_scan` |
+| `KIND_SIMD_LINEAR_SCAN` | `SIMDLinearScan` | `_kernel_last_simd_linear_scan` / `_kernel_first_simd_linear_scan` |
+| `KIND_BRACKET_GALLOP` | `BracketGallop` | `_kernel_last_bracket_gallop` / `_kernel_first_bracket_gallop` |
+| `KIND_EXP_FROM_LEFT` | `ExpFromLeft` | `_kernel_last_exp_from_left` / `_kernel_first_exp_from_left` |
+| `KIND_INTERPOLATION_SEARCH` | `InterpolationSearch` | `_kernel_last_interpolation_search` / `_kernel_first_interpolation_search` |
+| `KIND_BIT_INTERPOLATION_SEARCH` | `BitInterpolationSearch` | `_kernel_last_bit_interpolation_search` / `_kernel_first_bit_interpolation_search` |
+| `KIND_UNIFORM_STEP` | `UniformStep` | `_kernel_last_uniform_step` / `_kernel_first_uniform_step` |
+| `KIND_BISECT_THEN_SIMD` | `BisectThenSIMD` | (positional dispatch falls back to BinaryBracket; equality dispatch goes through `findfirstsortedequal`) |
+
+Stateful strategies that do **not** have an enum tag and stay on the
+multimethod path:
+
+  - [`Auto`](@ref FindFirstFunctions.Auto): carries a `StrategyKind` field
+    plus a [`SearchProperties`](@ref FindFirstFunctions.SearchProperties)
+    cache. `Auto`'s `searchsorted_last` is a one-line forward to the stored
+    kind; the batched dispatch re-resolves the kind from
+    `(v, queries)` because the gap heuristic needs the queries.
+  - [`GuesserHint`](@ref FindFirstFunctions.GuesserHint): carries a
+    [`Guesser`](@ref FindFirstFunctions.Guesser) (with its `idx_prev::Ref{Int}`
+    and `linear_lookup::Bool`). Dispatches via its own
+    `searchsorted_last(::GuesserHint, ...)` / `searchsorted_first(::GuesserHint, ...)`
+    methods.
 
 ## When to pick which
 
@@ -31,6 +85,37 @@ callers who already know their access pattern and want to pin a strategy.
 All hint-consuming strategies fall back to `BinaryBracket` when no hint is
 supplied or when the hint is out of range. `InterpolationSearch` additionally
 falls back to `BinaryBracket` for non-numeric element types.
+
+## Migrating from v2 (`Base.searchsortedlast(::S, ...)`) to v3
+
+The v2 `Base.searchsortedlast(::S, ...)` / `Base.searchsortedfirst(::S, ...)`
+methods are removed in v3. The migration is a mechanical rename —
+`searchsortedlast` → `searchsorted_last`, `searchsortedfirst` → `searchsorted_first` —
+with the strategy argument unchanged:
+
+```julia
+# v2 (removed)
+searchsortedlast(BracketGallop(), v, x, hint)
+searchsortedfirst(InterpolationSearch(), v, x)
+searchsortedlast(Auto(v), v, x, hint)
+searchsortedfirst(GuesserHint(g), v, x)
+
+# v3
+searchsorted_last(BracketGallop(), v, x, hint)
+searchsorted_first(InterpolationSearch(), v, x)
+searchsorted_last(Auto(v), v, x, hint)
+searchsorted_first(GuesserHint(g), v, x)
+```
+
+Hot loops that pick the strategy from runtime data should use the
+`StrategyKind` enum form (`searchsorted_last(KIND_BRACKET_GALLOP, v, x, hint)`);
+for a literal singleton strategy the struct form compiles to exactly the
+same code.
+
+The batched API (`searchsortedlast!`, `searchsortedfirst!`,
+`searchsortedrange`) and the equality API (`findequal`,
+`findfirstequal`, `findfirstsortedequal`) are FFF-owned names and are
+unchanged.
 
 ## Reference
 
@@ -63,10 +148,11 @@ The sentinel for "not found" is `firstindex(v) - 1` (`= 0` for 1-based
 vectors). Type-stable `Int` return, no `Union` with `Nothing`. Callers can
 test for absence with `i < firstindex(v)`.
 
-`findequal` routes most strategies through `searchsortedfirst + post-check`
+`findequal` routes most strategies through `searchsorted_first + post-check`
 generically, so `findequal(BracketGallop(), v, x, hint)`,
 `findequal(SIMDLinearScan(), v, x, hint)`,
-`findequal(GuesserHint(g), v, x)`, etc. all just work.
+`findequal(GuesserHint(g), v, x)`, `findequal(KIND_BRACKET_GALLOP, v, x, hint)`,
+etc. all just work.
 
 The [`BisectThenSIMD`](@ref FindFirstFunctions.BisectThenSIMD) strategy
 short-circuits the post-check path on `DenseVector{Int64}` by dispatching
@@ -86,8 +172,8 @@ caller has strong evidence that the hint is close.
 
 For `length(v) ≤ 16`, `LinearScan` is faster than `BracketGallop` even from a
 bad hint because the bracket bookkeeping costs more than a worst-case walk
-across a vector that short. `Auto`'s per-query path picks `LinearScan` below
-that threshold.
+across a vector that short. `Auto`'s resolution rule picks `KIND_LINEAR_SCAN`
+below that threshold.
 
 ### SIMDLinearScan
 
@@ -97,90 +183,32 @@ the hint is past the answer) uses the scalar `LinearScan` path — the SIMD
 primitive is only defined in the forward direction.
 
 Specialized for `DenseVector{Int64}` and `DenseVector{Float64}`. Any other
-element type falls back to the scalar `LinearScan` walk (this includes
-`Int32`, `UInt64`, `Float32`, `Date`, `String`, and user-defined numeric
-types). The dispatch is *static* — there's no runtime type test on a hot
-path — so the fallback costs nothing per-call when picked at compile time.
+element type falls back to the scalar `LinearScan` walk. The dispatch is
+*static* — there's no runtime type test on a hot path.
 
 Caveats:
 
-  - **Element types**: `Int64` and `Float64` only. Anything else uses
-    scalar `LinearScan`. This is a hard restriction of the LLVM IR: the
-    vector load uses `<8 x i64>` / `<8 x double>` with 8-byte stride, and
-    the broadcast and compare are typed accordingly.
-  - **NaN**: a `NaN` element in a `Float64` vector compares as `false`
-    under both `fcmp ogt` and `fcmp oge`, so a NaN in `v` is silently
-    skipped by the SIMD scan. Sorted `Float64` vectors containing `NaN`
-    aren't well-defined under any total order anyway — same caveat
-    applies to plain `Base.searchsortedlast` on such vectors.
-  - **Forward order only**: non-`Forward` orderings fall back to scalar
-    `LinearScan`. The IR is hard-coded to the `Forward` comparison
-    polarity.
+  - **Element types**: `Int64` and `Float64` only.
+  - **NaN**: a `NaN` element in a `Float64` vector compares as `false` —
+    the SIMD scan silently skips it. Sorted `Float64` vectors containing
+    `NaN` aren't well-defined under any total order.
+  - **Order**: `Forward` and `Reverse` only.
   - **No hint**: falls back to [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket).
-    Without a hint there's no direction information for the forward scan.
-  - **Auto does not pick this strategy.** `SIMDLinearScan` is opt-in. It
-    isn't part of the `Auto` decision tree because the regime where it
-    strictly beats `LinearScan` (long forward walks on `Int64`/`Float64`)
-    overlaps with the regime where `Auto` already prefers
-    [`BracketGallop`](@ref FindFirstFunctions.BracketGallop) or
-    [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft). Pin it
-    explicitly when you have a workload that wants a long linear forward
-    scan and you know the element type.
+  - **Auto does not pick this strategy** by default in the per-query path.
+    The batched dispatch picks it inside a gap window where the SIMD chunk
+    pays for itself.
 
 ### BitInterpolationSearch
 
 `InterpolationSearch` with the extrapolation guess computed on the IEEE
-bit pattern of `v` rather than the float values themselves. For positive
-Float64 values, the IEEE bit pattern is monotonically increasing with the
-float value and is approximately *linear* in array index for log-spaced
-(geometric) data. That makes the bit-domain linear extrapolation a far
-better guess than the float-domain linear extrapolation on geometric data
-— sometimes O(1) versus O(log n) refinement cost.
+bit pattern of `v` rather than the float values themselves. Wins on
+log-spaced (geometric) data — sometimes O(1) versus O(log n) refinement
+cost.
 
-**Opt-in only.** `Auto` does not pick `BitInterpolationSearch`. The bench
-sweep at `bench/bitinterp_sweep.jl` covers 1404 cells (9 v patterns × 4 q
-patterns × 6 n sizes up to 2²⁰ × 7 m sizes, exercising pure-geometric,
-log-spaced over 18 decades, power-of-2 spacing, two-decade clumps, and
-jittered-log alongside uniform/sqrt as negative controls). BitInterp
-wins outright in 59 cells (4.2%) and sits within 10% of the per-cell
-best in 75 cells (5.3%). The wins concentrate in:
+**Opt-in only.** `Auto` does not pick `BitInterpolationSearch`.
 
-  - `logspaced` / `logspaced_wide` / `geometric_dense` / `geometric_sparse`
-    / `jittered_log` — i.e. genuinely geometric data.
-  - Small `m` (= 4, occasionally 16): the per-query bit-domain guess cost
-    amortizes poorly across larger batches.
-  - Large `n` (≥ 2¹⁴, peaking at 2²⁰): the saved bracket refinement scales
-    with `log₂ n`, while the per-query setup cost is constant.
-
-Sample wins (BitInterp vs second-best, ns/q):
-
-| Cell | BitInterp | Runner-up | Margin |
-|---|---|---|---|
-| `logspaced_wide log_grid n=2²⁰ m=4` | 52.5 | InterpolationSearch 75.0 | 1.43× |
-| `logspaced_wide log_grid n=2¹² m=4` | 35.0 | ExpFromLeft 47.5 | 1.36× |
-| `logspaced_wide log_grid n=2¹⁸ m=4` | 47.5 | ExpFromLeft 62.5 | 1.32× |
-| `logspaced_wide dense_grid n=2²⁰ m=4` | 50.0 | ExpFromLeft 65.0 | 1.30× |
-
-`Auto` doesn't pick it because:
-  - The wins are narrow (4% of cells in a bench specifically designed to
-    probe BitInterp's regime).
-  - Adding the eligibility check to `Auto`'s hot path (Float64 + positive
-    + log-linear sampled probe) would burn a few ns on every call, paying
-    back only in cells with `m ≤ 16` where Auto's overhead already
-    dominates the per-query cost.
-  - Users with a known log-spaced workload can pin
-    `searchsortedlast!(out, v, queries; strategy = BitInterpolationSearch())`
-    once and get the win without any heuristic cost.
-
-The strategy is retained as an opt-in for callers whose workload sits
-outside what `Auto` discovers cheaply: domain-specific tables (radiation
-transport, log-frequency, gravitational potentials) or hardware where
-Float64 division is unusually cheap.
-
-Falls back to plain `InterpolationSearch` on non-Float64 dense eltypes
-(where the bit pattern equals the value, making the strategies
-equivalent), and to `BinaryBracket` for non-positive or non-finite Float64
-data.
+Falls back to plain `InterpolationSearch` on non-Float64 dense eltypes,
+and to `BinaryBracket` for non-positive or non-finite Float64 data.
 
 ### BracketGallop
 
@@ -201,46 +229,55 @@ v[lo+16], …` exponentially, then binary-searches inside the final bracket.
 
 Used by `Auto`'s batched dispatch when the queries are sorted: each call
 passes `hint = previous_result`, which by sortedness satisfies the "answer ≥
-hint" precondition. When the precondition is violated (the caller passes a
-hint past the answer), `ExpFromLeft` falls back to a full
-`searchsortedfirst` / `searchsortedlast` — slow but correct.
+hint" precondition.
 
 ### InterpolationSearch
 
 Computes a guess via linear extrapolation between `v[lo]` and `v[hi]`, then
 refines with a bounded binary search around that guess. On uniformly-spaced
 numeric data the first guess is the right answer — O(1) per query
-independent of `n`. On irregular data the guess is bad and the binary search
-inside the (full) bracket falls back to O(log n).
+independent of `n`.
 
 Two restrictions:
 
-  - **Numeric eltype**: requires `x - v[i]` to be well-defined and produce a
-    number whose ratio with `v[hi] - v[lo]` makes sense. Non-numeric eltypes
-    fall back to `BinaryBracket`.
-  - **Forward ordering only**: the linear-extrapolation formula assumes
-    `v[lo] ≤ v[hi]`. Non-`Forward` orderings fall back to `BinaryBracket`.
+  - **Numeric eltype**: non-numeric eltypes fall back to `BinaryBracket`.
+  - **Forward ordering only**: non-`Forward` orderings fall back to
+    `BinaryBracket`.
 
 The hint is ignored — the guess is computed fresh from the endpoints.
 
 ### BinaryBracket
 
 Plain `Base.searchsortedlast` / `Base.searchsortedfirst`. Provided as a
-strategy so that callers can opt out of hint-based behaviour explicitly, and
-so that other strategies have a well-defined name to fall back to. Ignores
-any hint that is supplied.
+strategy so callers can opt out of hint-based behaviour explicitly, and so
+other strategies have a well-defined name to fall back to. Ignores any
+hint.
 
 ### Auto
 
 See [Auto: heuristics and benchmarks](@ref) for the full decision tree and
 the benchmark sweep that produced its crossover constants.
 
+In v3, `Auto` carries a stored `StrategyKind` plus a `SearchProperties`
+cache:
+
+  - `Auto()` defaults to `KIND_BINARY_BRACKET`. Safe but no faster than
+    plain `Base.searchsortedlast`.
+  - `Auto(v)` resolves the kind from `length(v)` and `SearchProperties(v)`.
+    Picks `KIND_UNIFORM_STEP` for `AbstractRange` / detected-uniform
+    vectors, `KIND_LINEAR_SCAN` for short vectors, `KIND_BRACKET_GALLOP`
+    otherwise.
+  - `Auto(v, props)` is the same with a pre-computed `props` cache.
+
+The per-query `searchsorted_last(::Auto, v, x, hint)` is a one-line forward to
+`searchsorted_last(s.kind, v, x, hint)`. The batched
+`searchsortedlast!(out, v, queries; strategy = Auto())` re-resolves the
+kind from `(v, queries)` to consult the gap heuristic.
+
 ## Equality routines
 
 The package exposes two `Union{Int, Nothing}`-returning equality routines —
 [`findfirstequal`](@ref FindFirstFunctions.findfirstequal) (unsorted SIMD
 scan) and [`findfirstsortedequal`](@ref FindFirstFunctions.findfirstsortedequal)
-(sorted bisect-then-SIMD scan). They live outside the strategy framework
-because their return semantics differ (`nothing` on miss, vs. in-range
-index for the positional API). See the [Equality search](@ref Equality-search) page for the
-full documentation.
+(sorted bisect-then-SIMD scan). See the [Equality search](@ref Equality-search) page for
+the full documentation.
