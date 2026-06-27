@@ -1,23 +1,10 @@
-using FindFirstFunctions, Aqua, ExplicitImports, JET, AllocCheck, Test
+using FindFirstFunctions, JET, AllocCheck, Test
 
-@testset "Aqua" begin
-    Aqua.find_persistent_tasks_deps(FindFirstFunctions)
-    Aqua.test_ambiguities(FindFirstFunctions, recursive = false)
-    Aqua.test_deps_compat(FindFirstFunctions)
-    Aqua.test_piracies(FindFirstFunctions)
-    Aqua.test_project_extras(FindFirstFunctions)
-    Aqua.test_stale_deps(FindFirstFunctions)
-    Aqua.test_unbound_args(FindFirstFunctions)
-    Aqua.test_undefined_exports(FindFirstFunctions)
-end
+# Beyond the package-wide JET pass in run_qa (qa.jl), assert type stability on the
+# specific hot-path call signatures, and assert they allocate nothing — guarantees
+# `JET.test_package` / `Aqua` do not make on their own.
 
-@testset "ExplicitImports" begin
-    @test check_no_implicit_imports(FindFirstFunctions) === nothing
-    @test check_no_stale_explicit_imports(FindFirstFunctions) === nothing
-end
-
-@testset "JET static analysis" begin
-    vec_int64 = Int64[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+@testset "JET static analysis (hot-path signatures)" begin
     vec_float64 = Float64[1.0, 2.0, 3.0, 4.0, 5.0]
 
     # findfirstequal - fast SIMD-based search
@@ -126,7 +113,7 @@ end
     end
 
     @testset "searchsorted_last via enum tag" begin
-        # Each kind on Int64 / Float64 dense vectors: no allocations.
+        # Each kind on Int64 dense vectors: no allocations.
         for kind in (
                 KIND_BINARY_BRACKET, KIND_LINEAR_SCAN,
                 KIND_BRACKET_GALLOP, KIND_EXP_FROM_LEFT,
