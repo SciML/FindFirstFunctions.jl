@@ -10,28 +10,25 @@ i = searchsorted_last(BracketGallop(), v, 3.14, 30)
 
 # Batched, with strategy chosen by Auto.
 idx = Vector{Int}(undef, length(queries))
-searchsortedlast!(idx, v, queries)</code></pre><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><ul><li><p>Please refer to the <a href="https://github.com/SciML/ColPrac/blob/master/README.md">SciML ColPrac: Contributor&#39;s Guide on Collaborative Practices for Community Packages</a> for guidance on PRs, issues, and other matters relating to contributing to SciML.</p></li><li><p>See the <a href="https://github.com/SciML/SciMLStyle">SciML Style Guide</a> for common coding practices and other style decisions.</p></li><li><p>There are a few community forums:</p><ul><li>The #diffeq-bridged and #sciml-bridged channels in the <a href="https://julialang.org/slack/">Julia Slack</a></li><li>The #diffeq-bridged and #sciml-bridged channels in the <a href="https://julialang.zulipchat.com/#narrow/stream/279055-sciml-bridged">Julia Zulip</a></li><li>On the <a href="https://discourse.julialang.org">Julia Discourse forums</a></li><li>See also <a href="https://sciml.ai/community/">SciML Community page</a></li></ul></li></ul><h2 id="Reproducibility"><a class="docs-heading-anchor" href="#Reproducibility">Reproducibility</a><a id="Reproducibility-1"></a><a class="docs-heading-anchor-permalink" href="#Reproducibility" title="Permalink"></a></h2><details><summary>The documentation of this SciML package was built using these direct dependencies,</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Status</span></span> `~/_work/FindFirstFunctions.jl/FindFirstFunctions.jl/docs/Project.toml`
-<span class="sgr32">⌃</span> <span class="sgr90">[82cc6244] </span>DataInterpolations v4.7.0
+searchsortedlast!(idx, v, queries)</code></pre><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><ul><li><p>Please refer to the <a href="https://github.com/SciML/ColPrac/blob/master/README.md">SciML ColPrac: Contributor&#39;s Guide on Collaborative Practices for Community Packages</a> for guidance on PRs, issues, and other matters relating to contributing to SciML.</p></li><li><p>See the <a href="https://github.com/SciML/SciMLStyle">SciML Style Guide</a> for common coding practices and other style decisions.</p></li><li><p>There are a few community forums:</p><ul><li>The #diffeq-bridged and #sciml-bridged channels in the <a href="https://julialang.org/slack/">Julia Slack</a></li><li>The #diffeq-bridged and #sciml-bridged channels in the <a href="https://julialang.zulipchat.com/#narrow/stream/279055-sciml-bridged">Julia Zulip</a></li><li>On the <a href="https://discourse.julialang.org">Julia Discourse forums</a></li><li>See also <a href="https://sciml.ai/community/">SciML Community page</a></li></ul></li></ul><h2 id="Reproducibility"><a class="docs-heading-anchor" href="#Reproducibility">Reproducibility</a><a id="Reproducibility-1"></a><a class="docs-heading-anchor-permalink" href="#Reproducibility" title="Permalink"></a></h2><details><summary>The documentation of this SciML package was built using these direct dependencies,</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Status</span></span> `~/work/FindFirstFunctions.jl/FindFirstFunctions.jl/docs/Project.toml`
+  <span class="sgr90">[82cc6244] </span>DataInterpolations v9.0.0
   <span class="sgr90">[e30172f5] </span>Documenter v1.17.0
-  <span class="sgr90">[64ca27bc] </span>FindFirstFunctions v3.0.1 `~/_work/FindFirstFunctions.jl/FindFirstFunctions.jl`
+  <span class="sgr90">[64ca27bc] </span>FindFirstFunctions v3.0.1 `~/work/FindFirstFunctions.jl/FindFirstFunctions.jl`
 <span class="sgr33">⌅</span> <span class="sgr90">[429524aa] </span>Optim v1.13.3
   <span class="sgr90">[91a5bcdd] </span>Plots v1.41.6
   <span class="sgr90">[29dad682] </span>RegularizationTools v0.6.0
   <span class="sgr90">[860ef19b] </span>StableRNGs v1.0.4
-<span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr32">⌃</span> and <span class="sgr33">⌅</span> have new versions available. Those with <span class="sgr32">⌃</span> may be upgradable, but those with <span class="sgr33">⌅</span> are restricted by compatibility constraints from upgrading. To see why use `status --outdated`</code></pre></details><details><summary>and using this machine and Julia version.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Julia Version 1.12.6
+<span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr33">⌅</span> have new versions available but compatibility constraints restrict them from upgrading. To see why use `status --outdated`</code></pre></details><details><summary>and using this machine and Julia version.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Julia Version 1.12.6
 Commit 15346901f00 (2026-04-09 19:20 UTC)
 Build Info:
   Official https://julialang.org release
 Platform Info:
   OS: Linux (x86_64-linux-gnu)
-  CPU: 128 × AMD EPYC 9354 32-Core Processor
+  CPU: 4 × AMD EPYC 7763 64-Core Processor
   WORD_SIZE: 64
-  LLVM: libLLVM-18.1.7 (ORCJIT, znver4)
+  LLVM: libLLVM-18.1.7 (ORCJIT, znver3)
   GC: Built with stock GC
-Threads: 1 default, 1 interactive, 1 GC (on 4 virtual cores)
-Environment:
-  JULIA_CPU_THREADS = 4
-  JULIA_NUM_PRECOMPILE_TASKS = 4</code></pre></details><details><summary>A more complete overview of all dependencies and their versions is also provided.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Status</span></span> `~/_work/FindFirstFunctions.jl/FindFirstFunctions.jl/docs/Manifest.toml`
+Threads: 1 default, 1 interactive, 1 GC (on 4 virtual cores)</code></pre></details><details><summary>A more complete overview of all dependencies and their versions is also provided.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Status</span></span> `~/work/FindFirstFunctions.jl/FindFirstFunctions.jl/docs/Manifest.toml`
   <span class="sgr90">[47edcb42] </span>ADTypes v1.22.1
   <span class="sgr90">[a4c015fc] </span>ANSIColoredPrinters v0.0.1
   <span class="sgr90">[1520ce14] </span>AbstractTrees v0.4.5
@@ -52,7 +49,7 @@ Environment:
   <span class="sgr90">[d38c429a] </span>Contour v0.6.3
   <span class="sgr90">[a8cc5b0e] </span>Crayons v4.1.1
   <span class="sgr90">[9a962f9c] </span>DataAPI v1.16.0
-<span class="sgr32">⌃</span> <span class="sgr90">[82cc6244] </span>DataInterpolations v4.7.0
+  <span class="sgr90">[82cc6244] </span>DataInterpolations v9.0.0
   <span class="sgr90">[864edb3b] </span>DataStructures v0.19.5
   <span class="sgr90">[e2d170a0] </span>DataValueInterfaces v1.0.0
   <span class="sgr90">[8bb1440f] </span>DelimitedFiles v1.9.1
@@ -65,11 +62,11 @@ Environment:
   <span class="sgr90">[460bff9d] </span>ExceptionUnwrapping v0.1.11
   <span class="sgr90">[c87230d0] </span>FFMPEG v0.4.5
   <span class="sgr90">[1a297f60] </span>FillArrays v1.16.0
-  <span class="sgr90">[64ca27bc] </span>FindFirstFunctions v3.0.1 `~/_work/FindFirstFunctions.jl/FindFirstFunctions.jl`
+  <span class="sgr90">[64ca27bc] </span>FindFirstFunctions v3.0.1 `~/work/FindFirstFunctions.jl/FindFirstFunctions.jl`
   <span class="sgr90">[6a86dc24] </span>FiniteDiff v2.31.1
 <span class="sgr33">⌅</span> <span class="sgr90">[53c48c17] </span>FixedPointNumbers v0.8.6
   <span class="sgr90">[1fa38f19] </span>Format v1.3.7
-<span class="sgr32">⌃</span> <span class="sgr90">[f6369f11] </span>ForwardDiff v0.10.39
+  <span class="sgr90">[f6369f11] </span>ForwardDiff v1.4.1
   <span class="sgr90">[28b8d3ca] </span>GR v0.73.26
   <span class="sgr90">[d7ba0133] </span>Git v1.5.0
   <span class="sgr90">[42e2da0e] </span>Grisu v1.0.2
@@ -86,7 +83,7 @@ Environment:
   <span class="sgr90">[50d2b5c4] </span>Lazy v0.15.1
   <span class="sgr90">[0fc2ff8b] </span>LeastSquaresOptim v0.8.10
 <span class="sgr32">⌃</span> <span class="sgr90">[d3d80556] </span>LineSearches v7.5.1
-<span class="sgr33">⌅</span> <span class="sgr90">[2ab3a3ac] </span>LogExpFunctions v0.3.29
+  <span class="sgr90">[2ab3a3ac] </span>LogExpFunctions v1.0.1
   <span class="sgr90">[e6f89c97] </span>LoggingExtras v1.2.0
   <span class="sgr90">[d8e11817] </span>MLStyle v0.4.17
   <span class="sgr90">[1914dd2f] </span>MacroTools v0.5.16
@@ -107,7 +104,7 @@ Environment:
   <span class="sgr90">[85a6dd25] </span>PositiveFactorizations v0.2.4
   <span class="sgr90">[aea7be01] </span>PrecompileTools v1.3.4
   <span class="sgr90">[21216c6a] </span>Preferences v1.5.2
-<span class="sgr33">⌅</span> <span class="sgr90">[08abe8d2] </span>PrettyTables v2.4.0
+  <span class="sgr90">[08abe8d2] </span>PrettyTables v3.3.2
   <span class="sgr90">[43287f4e] </span>PtrArrays v1.4.0
   <span class="sgr90">[3cdcf5f2] </span>RecipesBase v1.3.4
   <span class="sgr90">[01d81517] </span>RecipesPipeline v0.6.12
@@ -267,4 +264,4 @@ Environment:
   <span class="sgr90">[8e850b90] </span>libblastrampoline_jll v5.15.0+0
   <span class="sgr90">[8e850ede] </span>nghttp2_jll v1.64.0+1
   <span class="sgr90">[3f19e933] </span>p7zip_jll v17.7.0+0
-<span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr32">⌃</span> and <span class="sgr33">⌅</span> have new versions available. Those with <span class="sgr32">⌃</span> may be upgradable, but those with <span class="sgr33">⌅</span> are restricted by compatibility constraints from upgrading. To see why use `status --outdated -m`</code></pre></details><p>You can also download the <a href="https://github.com/SciML/FindFirstFunctions.jl/tree/gh-pages/v3.0.1/assets/Manifest.toml">manifest</a> file and the <a href="https://github.com/SciML/FindFirstFunctions.jl/tree/gh-pages/v3.0.1/assets/Project.toml">project</a> file.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="interface/">Interface and extension rules »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Saturday 27 June 2026 17:14">Saturday 27 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+<span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr32">⌃</span> and <span class="sgr33">⌅</span> have new versions available. Those with <span class="sgr32">⌃</span> may be upgradable, but those with <span class="sgr33">⌅</span> are restricted by compatibility constraints from upgrading. To see why use `status --outdated -m`</code></pre></details><p>You can also download the <a href="https://github.com/SciML/FindFirstFunctions.jl/tree/gh-pages/v3.0.1/assets/Manifest.toml">manifest</a> file and the <a href="https://github.com/SciML/FindFirstFunctions.jl/tree/gh-pages/v3.0.1/assets/Project.toml">project</a> file.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="interface/">Interface and extension rules »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 29 June 2026 14:29">Monday 29 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
