@@ -49,6 +49,18 @@ FindFirstFunctions.strategy_kind
 | `KIND_UNIFORM_STEP` | `UniformStep` | `_kernel_last_uniform_step` / `_kernel_first_uniform_step` |
 | `KIND_BISECT_THEN_SIMD` | `BisectThenSIMD` | (positional dispatch falls back to BinaryBracket; equality dispatch goes through `findfirstsortedequal`) |
 
+```@docs
+FindFirstFunctions.KIND_BINARY_BRACKET
+FindFirstFunctions.KIND_LINEAR_SCAN
+FindFirstFunctions.KIND_SIMD_LINEAR_SCAN
+FindFirstFunctions.KIND_BRACKET_GALLOP
+FindFirstFunctions.KIND_EXP_FROM_LEFT
+FindFirstFunctions.KIND_INTERPOLATION_SEARCH
+FindFirstFunctions.KIND_BIT_INTERPOLATION_SEARCH
+FindFirstFunctions.KIND_UNIFORM_STEP
+FindFirstFunctions.KIND_BISECT_THEN_SIMD
+```
+
 Stateful strategies that do **not** have an enum tag and stay on the
 multimethod path:
 
