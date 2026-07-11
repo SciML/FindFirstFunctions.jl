@@ -1353,3 +1353,27 @@ end
         end
     end
 end
+
+@safetestset "Scalar primitive parity" begin
+    using FindFirstFunctions, StableRNGs
+    F = FindFirstFunctions
+
+    # `_scalar_first` backs the SIMD primitives on non-64-bit platforms;
+    # check it against `findfirst` on all platforms.
+    rng = StableRNG(2028)
+    for _ in 1:2_000
+        n = rand(rng, 0:64)
+        vi = rand(rng, Int64(-50):Int64(50), n)
+        xi = rand(rng, Int64(-60):Int64(60))
+        vf = randn(rng, n)
+        xf = randn(rng)
+        for (pred, v, x) in (
+                (==, vi, xi), (>, vi, xi), (>=, vi, xi), (<, vi, xi), (<=, vi, xi),
+                (>, vf, xf), (>=, vf, xf), (<, vf, xf), (<=, vf, xf),
+            )
+            ref = findfirst(e -> pred(e, x), v)
+            got = GC.@preserve v F._scalar_first(pred, x, pointer(v), Int64(length(v)))
+            @test got == (ref === nothing ? -1 : ref - 1)
+        end
+    end
+end

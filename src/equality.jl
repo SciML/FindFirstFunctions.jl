@@ -14,15 +14,16 @@ This function does **not** assume `A` is sorted. For sorted vectors, see
 `DenseVector{Int64}`) or [`findequal`](@ref) (the strategy-framework
 equality wrapper that returns an `Int` with a sentinel).
 
-The `(x::Int64, A::DenseVector{Int64})` method uses a custom LLVM IR SIMD
-scan (load 8 lanes, `icmp eq`, `cttz` on the mask) — about 8× faster than
-the scalar `findfirst(==(x), v)` on modern x86-64. Every other element-type
+On 64-bit platforms the `(x::Int64, A::DenseVector{Int64})` method uses a
+custom LLVM IR SIMD scan (load 8 lanes, `icmp eq`, `cttz` on the mask) —
+about 8× faster than the scalar `findfirst(==(x), v)` on modern x86-64;
+on 32-bit platforms it uses a scalar loop. Every other element-type
 and array-storage combination falls back to `findfirst(isequal(x), A)`.
 """
 findfirstequal(vpivot, ivars) = findfirst(isequal(vpivot), ivars)
 function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
     GC.@preserve ivars begin
-        ret = _findfirstequal(vpivot, pointer(ivars), length(ivars))
+        ret = _findfirstequal(vpivot, pointer(ivars), Int64(length(ivars)))
     end
     return ret < 0 ? nothing : ret + 1
 end
@@ -67,7 +68,7 @@ function findfirstsortedequal(
     end
     # maybe occurs in vars[offset+1:offset+len]
     GC.@preserve vars begin
-        ret = _findfirstequal(var, pointer(vars) + 8offset, len)
+        ret = _findfirstequal(var, pointer(vars) + 8offset, Int64(len))
     end
     return ret < 0 ? nothing : ret + offset + 1
 end
