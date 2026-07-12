@@ -6,5 +6,15 @@
 versions = ["1", "lts", "pre"]
 os = ["ubuntu-latest", "macos-latest", "windows-latest"]
 
+# 32-bit lane: a matrix-only alias that dispatches the Core body (GROUP=Core) on
+# a single x86 Julia, so the WORD_SIZE != 64 scalar fallbacks in src/simd_ir.jl
+# are exercised in CI. The `arch = "x86"` cell needs SciML/.github v1's i386-libs
+# step (setup-julia) and the alias skip in SciMLTesting >= 2.2 (folder discovery).
+["Core 32-bit"]
+group = "Core"
+versions = ["1"]
+os = ["ubuntu-latest"]
+arch = "x86"
+
 [QA]
 versions = ["lts", "1"]
