@@ -216,9 +216,9 @@ version = "1.16.0"
 
 [[deps.DataInterpolations]]
 deps = ["EnumX", "FindFirstFunctions", "ForwardDiff", "LinearAlgebra", "PrettyTables", "RecipesBase", "Reexport", "StaticArrays"]
-git-tree-sha1 = "181c40e46b11164b172981666060e0a0ac76e871"
+git-tree-sha1 = "75758ff6282fd4a69bc143d8df8a32e4694f4098"
 uuid = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
-version = "9.0.1"
+version = "9.0.2"
 
     [deps.DataInterpolations.extensions]
     DataInterpolationsChainRulesCoreExt = "ChainRulesCore"
@@ -411,7 +411,7 @@ version = "1.16.0"
 
 [[deps.FindFirstFunctions]]
 deps = ["PrecompileTools"]
-path = "/home/runner/work/FindFirstFunctions.jl/FindFirstFunctions.jl"
+path = "/home/runner/_work/FindFirstFunctions.jl/FindFirstFunctions.jl"
 uuid = "64ca27bc-2ba2-4a57-88aa-44e436879224"
 version = "3.0.3"
 
