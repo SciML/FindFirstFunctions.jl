@@ -413,7 +413,7 @@ version = "1.16.0"
 deps = ["PrecompileTools"]
 path = "/home/runner/_work/FindFirstFunctions.jl/FindFirstFunctions.jl"
 uuid = "64ca27bc-2ba2-4a57-88aa-44e436879224"
-version = "3.0.3"
+version = "3.1.0"
 
 [[deps.FiniteDiff]]
 deps = ["ArrayInterface", "LinearAlgebra", "Setfield"]
