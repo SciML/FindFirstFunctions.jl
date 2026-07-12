@@ -1377,3 +1377,24 @@ end
         end
     end
 end
+
+@safetestset "findfirstsortedequal generic fallback" begin
+    using FindFirstFunctions, StableRNGs
+    F = FindFirstFunctions
+
+    # The `(Int64, DenseVector{Int64})` method is the SIMD fast path; every
+    # other type (e.g. `Int32`, which is the native `Int` on 32-bit platforms)
+    # takes the generic searchsortedfirst fallback. Exercise it explicitly here
+    # so both paths are covered regardless of the host word size.
+    rng = StableRNG(2029)
+    for T in (Int32, Int16, Float32), _ in 1:500
+        n = rand(rng, 0:64)
+        v = sort!(rand(rng, T(-40):T(40), n))
+        for i in eachindex(v)
+            @test F.findfirstsortedequal(v[i], v) == searchsortedfirst(v, v[i])
+        end
+        x = rand(rng, T(-50):T(50))
+        ref = insorted(x, v) ? searchsortedfirst(v, x) : nothing
+        @test F.findfirstsortedequal(x, v) == ref
+    end
+end

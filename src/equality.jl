@@ -36,7 +36,10 @@ Find the index of the first occurrence of `var` in the sorted vector
 `DenseVector{Int64}` via a branchless binary bisection down to a small
 basecase, followed by the same SIMD equality scan that backs
 [`findfirstequal`](@ref) — faster than plain `findfirst(==(var), vars)`
-or `searchsortedfirst` + post-check for typical Int64 vectors.
+or `searchsortedfirst` + post-check for typical Int64 vectors. Every
+other element-type and array-storage combination (including native `Int`
+on 32-bit platforms, where `Int` is not `Int64`) falls back to a generic
+`searchsortedfirst` + equality post-check.
 
 The strategy-framework equivalent is
 [`findequal(BisectThenSIMD(), vars, var)`](@ref findequal); that wrapper
@@ -45,6 +48,10 @@ which is type-stable and composes with the rest of the strategy
 dispatch. Prefer `findequal` for new code; `findfirstsortedequal` remains
 as the dedicated `Union{Int64, Nothing}`-returning name.
 """
+function findfirstsortedequal(var, vars)
+    i = searchsortedfirst(vars, var)
+    return (i <= lastindex(vars) && isequal(@inbounds(vars[i]), var)) ? i : nothing
+end
 function findfirstsortedequal(
         var::Int64,
         vars::DenseVector{Int64},
