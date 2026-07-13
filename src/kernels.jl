@@ -579,6 +579,20 @@ end
 # BinaryBracket.
 # ===========================================================================
 
+# Truncate a guess coordinate `f` to an `Int` offset. The caller has already
+# clamped `f` to `[0, nm1)` (last) / `(0, nm1]` (first), so on the hardware
+# floats the fast `unsafe_trunc` is in-range and skips a redundant check.
+# Other ordered-`Real` ratio types — `Rational`, AD `Dual`, `BigFloat`, … —
+# do not all define `unsafe_trunc`, so fall back to the checked
+# `floor(Int, ·)` / `ceil(Int, ·)`, which every such type supports and which
+# is exact for the in-range `f`. The hardware-float union is spelled out
+# rather than via the non-public `Base.IEEEFloat` alias.
+const _HardwareFloat = Union{Float16, Float32, Float64}
+@inline _uniform_floor_index(f::_HardwareFloat) = unsafe_trunc(Int, floor(f))
+@inline _uniform_floor_index(f) = floor(Int, f)
+@inline _uniform_ceil_index(f::_HardwareFloat) = unsafe_trunc(Int, ceil(f))
+@inline _uniform_ceil_index(f) = ceil(Int, f)
+
 @inline function _kernel_last_uniform_step_props(
         props::SearchProperties, v::AbstractVector, x, order::Base.Order.Ordering,
     )
@@ -605,7 +619,7 @@ end
     elseif f >= nm1
         lastindex(v)
     else
-        firstindex(v) + unsafe_trunc(Int, floor(f))
+        firstindex(v) + _uniform_floor_index(f)
     end
     # Walk to the true cell. For exactly-uniform data this takes at most
     # one step (float roundoff); it also keeps the result correct when
@@ -640,7 +654,7 @@ end
     elseif f > nm1
         lastindex(v) + 1
     else
-        firstindex(v) + unsafe_trunc(Int, ceil(f))
+        firstindex(v) + _uniform_ceil_index(f)
     end
     @inbounds while i > firstindex(v) && !Base.Order.lt(order, v[i - 1], x)
         i -= 1

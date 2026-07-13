@@ -1445,3 +1445,33 @@ end
         @test F.findfirstsortedequal(x, v) == ref
     end
 end
+
+@safetestset "UniformStep kernel across non-primitive Real eltypes" begin
+    using FindFirstFunctions
+    using FindFirstFunctions: SearchProperties, Auto, searchsorted_last, searchsorted_first
+
+    # `Rational` ratio types don't define `unsafe_trunc(Int, ·)`, so a uniform
+    # `Rational` vector — which `Auto` resolves to the closed-form
+    # `KIND_UNIFORM_STEP` path — must fall back to `floor/ceil(Int, ·)` rather
+    # than erroring. `BigFloat` exercises the non-`IEEEFloat` AbstractFloat
+    # branch of the same helper.
+    uniform_vectors = (
+        Rational{Int}[i // 4 for i in 0:4:160],
+        Rational{BigInt}[big(i) // 4 for i in 0:4:160],
+        BigFloat[BigFloat(i) for i in range(0.0, 10.0; length = 40)],
+    )
+    for v in uniform_vectors
+        @test SearchProperties(v).is_uniform
+        auto = Auto(v)
+        @test auto isa Auto
+        for i in eachindex(v)
+            @test searchsorted_last(auto, v, v[i]) == searchsortedlast(v, v[i])
+            @test searchsorted_first(auto, v, v[i]) == searchsortedfirst(v, v[i])
+        end
+        # Between-knot and out-of-range queries.
+        for q in (v[1] - one(eltype(v)), (v[3] + v[4]) / 2, v[end] + one(eltype(v)))
+            @test searchsorted_last(auto, v, q) == searchsortedlast(v, q)
+            @test searchsorted_first(auto, v, q) == searchsortedfirst(v, q)
+        end
+    end
+end
