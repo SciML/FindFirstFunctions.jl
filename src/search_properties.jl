@@ -47,7 +47,12 @@ const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
         for k in 1:9
             kk = 1 + (k * nm1) ÷ 10
             expected = v1 + (kk - 1) / nm1 * span
-            rel_err = Float64(abs(v[kk] - expected) / abs_span)
+            # Native arithmetic (no `Float64` coercion) so non-primitive
+            # `Real` eltypes — e.g. `ForwardDiff.Dual` knots differentiated
+            # through — probe without an invalid scalar conversion. For
+            # `Int`/`Float32`/`Float64` this expression is already `Float64`,
+            # so the primitive hot path is unchanged.
+            rel_err = abs(v[kk] - expected) / abs_span
             rel_err > max_err && (max_err = rel_err)
         end
         return max_err
@@ -83,12 +88,12 @@ function _validated_uniform(v::AbstractVector{<:Real})
     n < 2 && return false
     @inbounds begin
         v1, vn = v[1], v[n]
-        span = Float64(vn - v1)
+        span = vn - v1
         (iszero(span) || !isfinite(span)) && return false
         nm1 = n - 1
         for i in 2:nm1
             expected = v1 + (i - 1) / nm1 * span
-            abs(Float64(v[i] - expected)) > _UNIFORM_REL_TOLERANCE * abs(span) &&
+            abs(v[i] - expected) > _UNIFORM_REL_TOLERANCE * abs(span) &&
                 return false
         end
     end
@@ -110,8 +115,8 @@ end
     @inbounds begin
         v1, vn = v[1], v[n]
         (v1 <= 0 || vn <= 0 || !isfinite(v1) || !isfinite(vn)) && return false
-        log_v1 = log(Float64(v1))
-        log_vn = log(Float64(vn))
+        log_v1 = log(v1)
+        log_vn = log(vn)
         span = log_vn - log_v1
         (iszero(span) || !isfinite(span)) && return false
         abs_span = abs(span)
@@ -121,7 +126,7 @@ end
             vk = v[kk]
             (vk <= 0 || !isfinite(vk)) && return false
             expected = log_v1 + (kk - 1) / nm1 * span
-            rel_err = abs(log(Float64(vk)) - expected) / abs_span
+            rel_err = abs(log(vk) - expected) / abs_span
             rel_err > tol && return false
         end
     end

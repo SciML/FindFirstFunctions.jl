@@ -645,6 +645,53 @@ end
     @test p_nonuniform.inv_step == 0.0
 end
 
+@safetestset "SearchProperties with ForwardDiff.Dual knots" begin
+    using FindFirstFunctions
+    using FindFirstFunctions: SearchProperties, Auto, searchsorted_last, searchsorted_first
+    using ForwardDiff
+
+    # `ForwardDiff.Dual <: Real`, so a Dual-valued knot vector — as produced
+    # when an interpolation is reconstructed inside `ForwardDiff` and the
+    # knots are promoted to Duals — dispatches to the `<:Real` probe. The
+    # probes must not force a `Float64(::Dual)` conversion (which errors);
+    # they must classify from the primal values and keep partials intact.
+    ForwardDiff.derivative(2.0) do p
+        t = collect(range(0.0, 1.0; length = 15)) .* p    # linear Dual knots
+        props = SearchProperties(t)
+        @test props.has_props
+        @test props.is_linear                              # linear in index
+        @test props.is_uniform                             # evenly spaced
+        # first_val / inv_step carry the derivative w.r.t. p.
+        @test ForwardDiff.value(props.first_val) == 0.0
+        # sum(t) = 7.5p, so d/dp = 7.5; exercise a value that depends on the
+        # branch chosen from the probe result.
+        props.is_linear ? sum(t) : 2 * sum(t)
+    end == 7.5
+
+    # Non-uniform Dual knots must probe without error and report not-uniform.
+    ForwardDiff.derivative(3.0) do p
+        t = (Float64[0, 1, 2, 4, 8, 16, 20, 21, 22, 40, 41, 100]) .* p
+        props = SearchProperties(t)
+        @test props.has_props
+        @test !props.is_uniform
+        sum(t)
+    end
+
+    # Full search path on uniform Dual knots exercises the closed-form
+    # UniformStep kernel (`Auto` resolves to `KIND_UNIFORM_STEP`). It must
+    # return the same index as `Base` on the primal values.
+    ForwardDiff.derivative(2.0) do p
+        t = collect(range(0.0, 10.0; length = 40)) .* p
+        tv = map(ForwardDiff.value, t)
+        auto = Auto(t)
+        for q in (t[1], t[7], t[end], 5.0 * p, -1.0 * p, 11.0 * p)
+            @test searchsorted_last(auto, t, q) == searchsortedlast(tv, ForwardDiff.value(q))
+            @test searchsorted_first(auto, t, q) == searchsortedfirst(tv, ForwardDiff.value(q))
+        end
+        sum(t)
+    end
+end
+
 @safetestset "Auto{T} parametric + props-aware UniformStep kernel" begin
     using FindFirstFunctions
     using FindFirstFunctions:
