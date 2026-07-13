@@ -47,11 +47,6 @@ const _AUTO_LINEAR_REL_TOLERANCE = 1.0e-3
         for k in 1:9
             kk = 1 + (k * nm1) ÷ 10
             expected = v1 + (kk - 1) / nm1 * span
-            # Native arithmetic (no `Float64` coercion) so non-primitive
-            # `Real` eltypes — e.g. `ForwardDiff.Dual` knots differentiated
-            # through — probe without an invalid scalar conversion. For
-            # `Int`/`Float32`/`Float64` this expression is already `Float64`,
-            # so the primitive hot path is unchanged.
             rel_err = abs(v[kk] - expected) / abs_span
             rel_err > max_err && (max_err = rel_err)
         end
