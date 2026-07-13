@@ -585,10 +585,12 @@ end
 # Other ordered-`Real` ratio types — `Rational`, AD `Dual`, `BigFloat`, … —
 # do not all define `unsafe_trunc`, so fall back to the checked
 # `floor(Int, ·)` / `ceil(Int, ·)`, which every such type supports and which
-# is exact for the in-range `f`.
-@inline _uniform_floor_index(f::Base.IEEEFloat) = unsafe_trunc(Int, floor(f))
+# is exact for the in-range `f`. The hardware-float union is spelled out
+# rather than via the non-public `Base.IEEEFloat` alias.
+const _HardwareFloat = Union{Float16, Float32, Float64}
+@inline _uniform_floor_index(f::_HardwareFloat) = unsafe_trunc(Int, floor(f))
 @inline _uniform_floor_index(f) = floor(Int, f)
-@inline _uniform_ceil_index(f::Base.IEEEFloat) = unsafe_trunc(Int, ceil(f))
+@inline _uniform_ceil_index(f::_HardwareFloat) = unsafe_trunc(Int, ceil(f))
 @inline _uniform_ceil_index(f) = ceil(Int, f)
 
 @inline function _kernel_last_uniform_step_props(
