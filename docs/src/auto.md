@@ -128,12 +128,12 @@ current answer than the linear-extrapolation guess from the endpoints.
 
 ## Reproducing the benchmarks
 
-The full sweep lives at [`bench/auto_sweep.jl`](https://github.com/SciML/FindFirstFunctions.jl/blob/main/bench/auto_sweep.jl)
+The full sweep lives at [`bench/auto_sweep.jl`](https://raw.githubusercontent.com/SciML/FindFirstFunctions.jl/main/bench/auto_sweep.jl)
 with the regime grid pre-configured. Run with
 `julia --project=bench bench/auto_sweep.jl`. It evaluates every shipped
 strategy against every regime cell, computes the per-cell winner, and
 reports `Auto`'s slack distribution against that optimum. An analysis
-helper at [`bench/analyze.jl`](https://github.com/SciML/FindFirstFunctions.jl/blob/main/bench/analyze.jl)
+helper at [`bench/analyze.jl`](https://raw.githubusercontent.com/SciML/FindFirstFunctions.jl/main/bench/analyze.jl)
 reads the resulting `bench/results.csv` and prints per-strategy
 win-by-regime tables.
 
