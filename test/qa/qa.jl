@@ -2,7 +2,6 @@ using SciMLTesting, FindFirstFunctions, JET, Test
 
 run_qa(
     FindFirstFunctions;
-    api_docs_kwargs = (; rendered = true),
     explicit_imports = true,
     ei_kwargs = (;
         # All six are Base internals accessed by qualification (GC.@preserve,
