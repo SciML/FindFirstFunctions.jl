@@ -55,7 +55,7 @@ let v = collect(Int64, 1:1024), x = Int64(500), hint = 480
             ("Auto", Auto()),
         ]
         SUITE["per_query"][name] = @benchmarkable(
-            searchsortedlast($strategy, $v, $x, $hint),
+            searchsorted_last($strategy, $v, $x, $hint),
             evals = 1, samples = 200,
         )
     end

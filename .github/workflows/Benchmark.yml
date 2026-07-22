@@ -5,6 +5,7 @@ on:
     paths:
       - "src/**"
       - "bench/**"
+      - "benchmark/**"
       - "Project.toml"
       - ".github/workflows/Benchmark.yml"
   workflow_dispatch:
@@ -20,7 +21,12 @@ permissions:
 
 jobs:
   benchmark:
-    uses: "SciML/.github/.github/workflows/benchmark.yml@v1"
-    with:
-      julia-version: "1.11"
-    secrets: "inherit"
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: MilesCranmer/AirspeedVelocity.jl@action-v1
+        with:
+          julia-version: "1.11"
+          bench-on: ${{ github.event.pull_request.head.sha || github.sha }}
+          job-summary: "true"
