@@ -55,7 +55,7 @@ end
 function findfirstsortedequal(
         var::Int64,
         vars::DenseVector{Int64},
-        ::Val{basecase} = Base.libllvm_version >= v"17" ? Val(8) : Val(128),
+        ::Val{basecase} = VERSION >= v"1.12" ? Val(8) : Val(128),
     ) where {basecase}
     len = length(vars)
     offset = 0

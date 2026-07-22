@@ -51,21 +51,21 @@ end
 
 # Julia 1.10's `@enum` does not accept inline docstrings for individual
 # values, so keep per-kind docs immediately next to the enum definition.
-@doc """
+"""
     KIND_BINARY_BRACKET::StrategyKind
 
 Select [`BinaryBracket`](@ref FindFirstFunctions.BinaryBracket), the plain
 binary-search fallback for positional sorted searches.
 """ KIND_BINARY_BRACKET
 
-@doc """
+"""
     KIND_LINEAR_SCAN::StrategyKind
 
 Select [`LinearScan`](@ref FindFirstFunctions.LinearScan), the hinted
 strategy that walks linearly from a nearby index.
 """ KIND_LINEAR_SCAN
 
-@doc """
+"""
     KIND_SIMD_LINEAR_SCAN::StrategyKind
 
 Select [`SIMDLinearScan`](@ref FindFirstFunctions.SIMDLinearScan), the
@@ -73,7 +73,7 @@ hinted linear scan with SIMD-specialized forward walks for supported dense
 vectors.
 """ KIND_SIMD_LINEAR_SCAN
 
-@doc """
+"""
     KIND_BRACKET_GALLOP::StrategyKind
 
 Select [`BracketGallop`](@ref FindFirstFunctions.BracketGallop), the hinted
@@ -81,7 +81,7 @@ strategy that expands a bidirectional exponential bracket before binary
 searching inside it.
 """ KIND_BRACKET_GALLOP
 
-@doc """
+"""
     KIND_EXP_FROM_LEFT::StrategyKind
 
 Select [`ExpFromLeft`](@ref FindFirstFunctions.ExpFromLeft), the hinted
@@ -89,7 +89,7 @@ strategy that treats the hint as a left bound and searches forward
 exponentially.
 """ KIND_EXP_FROM_LEFT
 
-@doc """
+"""
     KIND_INTERPOLATION_SEARCH::StrategyKind
 
 Select [`InterpolationSearch`](@ref FindFirstFunctions.InterpolationSearch),
@@ -97,7 +97,7 @@ the strategy that guesses from linear extrapolation across the vector
 endpoints.
 """ KIND_INTERPOLATION_SEARCH
 
-@doc """
+"""
     KIND_BIT_INTERPOLATION_SEARCH::StrategyKind
 
 Select
@@ -105,14 +105,14 @@ Select
 the opt-in interpolation strategy that guesses from Float64 bit patterns.
 """ KIND_BIT_INTERPOLATION_SEARCH
 
-@doc """
+"""
     KIND_UNIFORM_STEP::StrategyKind
 
 Select [`UniformStep`](@ref FindFirstFunctions.UniformStep), the direct
 arithmetic lookup strategy for uniformly-spaced vectors and ranges.
 """ KIND_UNIFORM_STEP
 
-@doc """
+"""
     KIND_BISECT_THEN_SIMD::StrategyKind
 
 Select [`BisectThenSIMD`](@ref FindFirstFunctions.BisectThenSIMD), the
