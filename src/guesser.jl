@@ -30,7 +30,7 @@ next correlated lookup by either
 """
 struct Guesser{T <: AbstractVector}
     v::T
-    idx_prev::Base.RefValue{Int}
+    idx_prev::typeof(Ref(1))
     linear_lookup::Bool
 end
 
