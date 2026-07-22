@@ -5,6 +5,7 @@ on:
     paths:
       - "src/**"
       - "bench/**"
+      - "benchmark/**"
       - "Project.toml"
       - ".github/workflows/Benchmark.yml"
   workflow_dispatch:
