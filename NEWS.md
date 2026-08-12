@@ -1,14 +1,5 @@
 # FindFirstFunctions.jl NEWS
 
-## 3.2.2
-
-`LinearScan` (`KIND_LINEAR_SCAN`) no longer wraps its ±1 walk in
-`@inbounds if` / `cond && return`. That control-flow shape produced invalid
-Windows unwind information (`ntdll!RtlVirtualUnwind2` ACCESS_VIOLATION)
-when the walk was reached from an OrdinaryDiffEq Dual right-hand side
-(DataInterpolations.jl#580). The kernels stay `@inline` so they still fuse
-into a lerp / Dual Jacobian. Search results are unchanged.
-
 ## 3.0.0
 
 The 2.x sorted-search API was a single generic

@@ -142,63 +142,62 @@ end
 # Kernel: LinearScan — walk ±1 from the hint.
 # ===========================================================================
 
-# Straight `if`/`return` body: `@inbounds if` wrapping `cond && return`
-# inside the walk produced invalid Windows unwind info. Keep `@inline`
-# so the walk fuses into DataInterpolations lerp / Dual Jacobian.
-@inline function _kernel_last_linear_scan(
+function _kernel_last_linear_scan(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
-    lo = firstindex(v)
-    hi = lastindex(v)
-    hi < lo && return lo - 1
+    lo, hi = firstindex(v), lastindex(v)
+    if hi < lo
+        return lo - 1   # empty vector
+    end
     i = clamp(hint, lo, hi)
-    @inbounds vi = v[i]
-    if Base.Order.lt(order, x, vi)
+    @inbounds if Base.Order.lt(order, x, v[i])
+        # v[i] > x → retreat
         while i > lo
             i -= 1
-            @inbounds vi = v[i]
-            if !Base.Order.lt(order, x, vi)
+            if !Base.Order.lt(order, x, v[i])
                 return i
             end
         end
-        return lo - 1
-    end
-    while i < hi
-        @inbounds vip1 = v[i + 1]
-        if Base.Order.lt(order, x, vip1)
-            return i
+        return lo - 1   # x precedes all of v
+    else
+        # v[i] ≤ x → try to advance
+        while i < hi
+            if Base.Order.lt(order, x, v[i + 1])
+                return i
+            end
+            i += 1
         end
-        i += 1
+        return hi
     end
-    return hi
 end
 
-@inline function _kernel_first_linear_scan(
+function _kernel_first_linear_scan(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
-    lo = firstindex(v)
-    hi = lastindex(v)
-    hi < lo && return lo
+    lo, hi = firstindex(v), lastindex(v)
+    if hi < lo
+        return lo
+    end
     i = clamp(hint, lo, hi)
-    @inbounds vi = v[i]
-    if Base.Order.lt(order, vi, x)
+    @inbounds if Base.Order.lt(order, v[i], x)
+        # v[i] < x → advance
         while i < hi
             i += 1
-            @inbounds vi = v[i]
-            if !Base.Order.lt(order, vi, x)
+            if !Base.Order.lt(order, v[i], x)
                 return i
             end
         end
-        return hi + 1
-    end
-    while i > lo
-        @inbounds vim1 = v[i - 1]
-        if Base.Order.lt(order, vim1, x)
-            return i
+        return hi + 1   # x exceeds all of v
+    else
+        # v[i] ≥ x → try to retreat
+        while i > lo
+            if Base.Order.lt(order, v[i - 1], x)
+                return i
+            end
+            i -= 1
         end
-        i -= 1
+        return lo
     end
-    return lo
 end
 
 # ===========================================================================
@@ -220,10 +219,7 @@ end
         # `v[i]` is past the answer in this ordering — backward walk (scalar).
         while i > lo
             i -= 1
-            @inbounds vi = v[i]
-            if !Base.Order.lt(order, x, vi)
-                return i
-            end
+            @inbounds !Base.Order.lt(order, x, v[i]) && return i
         end
         return lo - 1
     end
@@ -260,10 +256,7 @@ end
         return offset < 0 ? hi + 1 : start + offset
     end
     while i > lo
-        @inbounds vim1 = v[i - 1]
-        if Base.Order.lt(order, vim1, x)
-            return i
-        end
+        @inbounds Base.Order.lt(order, v[i - 1], x) && return i
         i -= 1
     end
     return lo
