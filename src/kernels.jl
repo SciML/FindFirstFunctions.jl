@@ -150,21 +150,17 @@ function _kernel_last_linear_scan(
         return lo - 1   # empty vector
     end
     i = clamp(hint, lo, hi)
-    @inbounds if Base.Order.lt(order, x, v[i])
+    if @inbounds Base.Order.lt(order, x, v[i])
         # v[i] > x → retreat
         while i > lo
             i -= 1
-            if !Base.Order.lt(order, x, v[i])
-                return i
-            end
+            @inbounds !Base.Order.lt(order, x, v[i]) && return i
         end
         return lo - 1   # x precedes all of v
     else
         # v[i] ≤ x → try to advance
         while i < hi
-            if Base.Order.lt(order, x, v[i + 1])
-                return i
-            end
+            @inbounds Base.Order.lt(order, x, v[i + 1]) && return i
             i += 1
         end
         return hi
@@ -179,22 +175,18 @@ function _kernel_first_linear_scan(
         return lo
     end
     i = clamp(hint, lo, hi)
-    @inbounds if Base.Order.lt(order, v[i], x)
+    if @inbounds Base.Order.lt(order, v[i], x)
         # v[i] < x → advance
         while i < hi
             i += 1
-            if !Base.Order.lt(order, v[i], x)
-                return i
-            end
+            @inbounds !Base.Order.lt(order, v[i], x) && return i
         end
         return hi + 1   # x exceeds all of v
     else
         # v[i] ≥ x → try to retreat
         while i > lo
-            if Base.Order.lt(order, v[i - 1], x)
-                return i
-            end
-            i -= 1
+            @inbounds !Base.Order.lt(order, v[i - 1], x) && (i -= 1; continue)
+            return i
         end
         return lo
     end
