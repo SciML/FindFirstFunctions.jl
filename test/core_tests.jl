@@ -692,6 +692,34 @@ end
     end
 end
 
+@safetestset "LinearScan with Dual queries on Float64 knots" begin
+    using FindFirstFunctions
+    using FindFirstFunctions: KIND_LINEAR_SCAN, searchsorted_last, searchsorted_first
+    using ForwardDiff
+    using Test
+
+    # ODE-Jacobian shape: Float64 knots, Dual query, Int hint (Guesser idx_prev).
+    t = [0.0, 0.3, 1.1, 2.0, 3.5, 5.0, 6.2, 8.0]
+    for (q, hint) in (
+            (1.1, 1), (3.5, 4), (8.0, 8), (0.0, 1), (-1.0, 1), (9.0, 8), (4.2, 3),
+        )
+        x = ForwardDiff.Dual(q, 1.0)
+        @test searchsorted_last(KIND_LINEAR_SCAN, t, x, hint) == searchsortedlast(t, x)
+        @test searchsorted_first(KIND_LINEAR_SCAN, t, x, hint) == searchsortedfirst(t, x)
+        @test searchsorted_last(KIND_LINEAR_SCAN, t, x, hint) isa Int
+    end
+
+    d = ForwardDiff.derivative(1.0) do p
+        acc = 0
+        for k in 1:64
+            q = 0.1 * k * p
+            acc += searchsorted_last(KIND_LINEAR_SCAN, t, q, 1)
+        end
+        Float64(acc)
+    end
+    @test isfinite(d)
+end
+
 @safetestset "Auto{T} parametric + props-aware UniformStep kernel" begin
     using FindFirstFunctions
     using FindFirstFunctions:

@@ -142,54 +142,62 @@ end
 # Kernel: LinearScan — walk ±1 from the hint.
 # ===========================================================================
 
-function _kernel_last_linear_scan(
+# `@noinline` plus a straight `if`/`return` body: `@inbounds if` wrapping
+# `cond && return` inside the walk produced invalid Windows unwind info.
+@noinline function _kernel_last_linear_scan(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
-    lo, hi = firstindex(v), lastindex(v)
-    if hi < lo
-        return lo - 1   # empty vector
-    end
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo - 1
     i = clamp(hint, lo, hi)
-    @inbounds if Base.Order.lt(order, x, v[i])
-        # v[i] > x → retreat
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, x, vi)
         while i > lo
             i -= 1
-            !Base.Order.lt(order, x, v[i]) && return i
+            @inbounds vi = v[i]
+            if !Base.Order.lt(order, x, vi)
+                return i
+            end
         end
-        return lo - 1   # x precedes all of v
-    else
-        # v[i] ≤ x → try to advance
-        while i < hi
-            Base.Order.lt(order, x, v[i + 1]) && return i
-            i += 1
-        end
-        return hi
+        return lo - 1
     end
-end
-
-function _kernel_first_linear_scan(
-        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
-    )
-    lo, hi = firstindex(v), lastindex(v)
-    if hi < lo
-        return lo
-    end
-    i = clamp(hint, lo, hi)
-    @inbounds if Base.Order.lt(order, v[i], x)
-        # v[i] < x → advance
-        while i < hi
-            i += 1
-            !Base.Order.lt(order, v[i], x) && return i
-        end
-        return hi + 1   # x exceeds all of v
-    else
-        # v[i] ≥ x → try to retreat
-        while i > lo
-            !Base.Order.lt(order, v[i - 1], x) && (i -= 1; continue)
+    while i < hi
+        @inbounds vip1 = v[i + 1]
+        if Base.Order.lt(order, x, vip1)
             return i
         end
-        return lo
+        i += 1
     end
+    return hi
+end
+
+@noinline function _kernel_first_linear_scan(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo
+    i = clamp(hint, lo, hi)
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, vi, x)
+        while i < hi
+            i += 1
+            @inbounds vi = v[i]
+            if !Base.Order.lt(order, vi, x)
+                return i
+            end
+        end
+        return hi + 1
+    end
+    while i > lo
+        @inbounds vim1 = v[i - 1]
+        if Base.Order.lt(order, vim1, x)
+            return i
+        end
+        i -= 1
+    end
+    return lo
 end
 
 # ===========================================================================
@@ -211,7 +219,10 @@ end
         # `v[i]` is past the answer in this ordering — backward walk (scalar).
         while i > lo
             i -= 1
-            @inbounds !Base.Order.lt(order, x, v[i]) && return i
+            @inbounds vi = v[i]
+            if !Base.Order.lt(order, x, vi)
+                return i
+            end
         end
         return lo - 1
     end
@@ -248,7 +259,10 @@ end
         return offset < 0 ? hi + 1 : start + offset
     end
     while i > lo
-        @inbounds Base.Order.lt(order, v[i - 1], x) && return i
+        @inbounds vim1 = v[i - 1]
+        if Base.Order.lt(order, vim1, x)
+            return i
+        end
         i -= 1
     end
     return lo
