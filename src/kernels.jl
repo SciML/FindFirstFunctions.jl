@@ -142,9 +142,10 @@ end
 # Kernel: LinearScan — walk ±1 from the hint.
 # ===========================================================================
 
-# `@noinline` plus a straight `if`/`return` body: `@inbounds if` wrapping
-# `cond && return` inside the walk produced invalid Windows unwind info.
-@noinline function _kernel_last_linear_scan(
+# Straight `if`/`return` body: `@inbounds if` wrapping `cond && return`
+# inside the walk produced invalid Windows unwind info. Keep `@inline`
+# so the walk fuses into DataInterpolations lerp / Dual Jacobian.
+@inline function _kernel_last_linear_scan(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
     lo = firstindex(v)
@@ -172,7 +173,7 @@ end
     return hi
 end
 
-@noinline function _kernel_first_linear_scan(
+@inline function _kernel_first_linear_scan(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
     lo = firstindex(v)

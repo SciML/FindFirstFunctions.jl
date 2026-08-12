@@ -6,8 +6,8 @@
 `@inbounds if` / `cond && return`. That control-flow shape produced invalid
 Windows unwind information (`ntdll!RtlVirtualUnwind2` ACCESS_VIOLATION)
 when the walk was reached from an OrdinaryDiffEq Dual right-hand side
-(DataInterpolations.jl#580). The kernels are also `@noinline` so the walk
-is not inlined into a Dual Jacobian. Search results are unchanged.
+(DataInterpolations.jl#580). The kernels stay `@inline` so they still fuse
+into a lerp / Dual Jacobian. Search results are unchanged.
 
 ## 3.0.0
 
