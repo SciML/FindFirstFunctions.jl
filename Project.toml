@@ -7,7 +7,7 @@ authors = ["Chris Elrod <elrodc@gmail.com> and contributors"]
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 
 [compat]
-ForwardDiff = "0.10, 1"
+ForwardDiff = "1"
 PrecompileTools = "1.0.1"
 SafeTestsets = "0.1"
 SciMLTesting = "2.4"
