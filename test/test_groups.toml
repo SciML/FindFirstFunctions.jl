@@ -1,6 +1,6 @@
 # Root test-group matrix for FindFirstFunctions.jl, consumed by the canonical
 # SciML/.github grouped-tests.yml@v1 caller (.github/workflows/Tests.yml).
-# runtests.jl reads ENV["GROUP"] and dispatches Core / QA.
+# runtests.jl reads ENV["GROUP"] and dispatches Core / QA / Enzyme.
 
 [Core]
 versions = ["1", "lts", "pre"]
@@ -18,3 +18,6 @@ arch = "x86"
 
 [QA]
 versions = ["lts", "1"]
+
+[Enzyme]
+versions = ["1"]
