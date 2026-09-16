@@ -1,5 +1,21 @@
 # FindFirstFunctions.jl NEWS
 
+## 3.3.0
+
+New `FindFirstFunctionsEnzymeCoreExt` weak-dependency extension (loads with
+`EnzymeCore`). It declares every search entry point — `searchsorted_last`,
+`searchsorted_first`, the batched `searchsortedlast!` / `searchsortedfirst!` /
+`searchsortedrange`, and the equality searches `findequal` /
+`findfirstequal` / `findfirstsortedequal` — as `EnzymeRules.inactive`.
+
+The searches return or fill indices and see their arguments only through
+comparisons, so no derivative flows through them and the declaration is exact.
+It also keeps Enzyme's reverse pass out of the early-exit search loops, whose
+`gc_preserve` token pairs currently trip an LLVM verifier abort in reverse mode
+(EnzymeAD/Enzyme.jl#3404) — previously any reverse-mode differentiation
+through an interpolation interval lookup, e.g. DataInterpolations inside an ODE
+right-hand side under `EnzymeVJP`, aborted the process.
+
 ## 3.0.0
 
 The 2.x sorted-search API was a single generic
