@@ -21,3 +21,6 @@ versions = ["lts", "1"]
 
 [Enzyme]
 versions = ["1"]
+
+[Mooncake]
+versions = ["1"]
