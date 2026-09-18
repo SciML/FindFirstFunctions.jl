@@ -33,7 +33,7 @@
     @testset "forward mode agrees" begin
         g(x) = interp(u, knots, x)
         cache = Mooncake.prepare_derivative_cache(g, x)
-        _, dx = Mooncake.value_and_derivative!!(cache, (g, Mooncake.NoTangent()), (x, 1.0))
+        _, dx = Mooncake.value_and_derivative!!(cache, (g, Mooncake.zero_tangent(g)), (x, 1.0))
         @test dx ≈ (u[iref + 1] - u[iref]) / (knots[iref + 1] - knots[iref])
     end
 

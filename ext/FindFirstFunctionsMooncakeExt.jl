@@ -30,7 +30,7 @@ const _INACTIVE_FNS = (
 )
 
 for f in _INACTIVE_FNS
-    @eval @zero_derivative MinimalCtx Tuple{typeof($f),Vararg}
+    @eval @zero_derivative MinimalCtx Tuple{typeof($f), Vararg}
 end
 
 const _InactiveFn = Union{map(typeof, _INACTIVE_FNS)...}
@@ -40,24 +40,24 @@ const _InactiveFn = Union{map(typeof, _INACTIVE_FNS)...}
 # so give that entry point the same treatment. The primal call must still go through
 # `Core.kwcall` itself so that a non-default keyword is honoured -- only the derivative is
 # zero here.
-@is_primitive MinimalCtx Tuple{typeof(Core.kwcall),NamedTuple,F,Vararg} where {F<:_InactiveFn}
+@is_primitive MinimalCtx Tuple{typeof(Core.kwcall), NamedTuple, F, Vararg} where {F <: _InactiveFn}
 
 function frule!!(
-    ::Dual{typeof(Core.kwcall)},
-    kwargs::Dual{<:NamedTuple},
-    f::Dual{<:_InactiveFn},
-    args::Vararg{Dual},
-)
+        ::Dual{typeof(Core.kwcall)},
+        kwargs::Dual{<:NamedTuple},
+        f::Dual{<:_InactiveFn},
+        args::Vararg{Dual},
+    )
     y = Core.kwcall(primal(kwargs), primal(f), map(primal, args)...)
     return zero_dual(y)
 end
 
 function rrule!!(
-    kwcall::CoDual{typeof(Core.kwcall)},
-    kwargs::CoDual{<:NamedTuple},
-    f::CoDual{<:_InactiveFn},
-    args::Vararg{CoDual},
-)
+        kwcall::CoDual{typeof(Core.kwcall)},
+        kwargs::CoDual{<:NamedTuple},
+        f::CoDual{<:_InactiveFn},
+        args::Vararg{CoDual},
+    )
     y = Core.kwcall(primal(kwargs), primal(f), map(primal, args)...)
     return zero_fcodual(y), NoPullback(kwcall, kwargs, f, args...)
 end
