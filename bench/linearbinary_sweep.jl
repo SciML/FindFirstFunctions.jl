@@ -118,11 +118,11 @@ function main()
             @printf "  %-6d" gap
             for MAX in MAXS
                 strat = F.LinearBinarySearch(MAX)
-                b = @benchmark searchsortedlast($strat, $v, $x, $hint) samples = 200 evals = 50
+                b = @benchmark F.searchsorted_last($strat, $v, $x, $hint) samples = 200 evals = 50
                 @printf " | %10.2f  " minimum(b.times)
             end
             for strat in (F.LinearScan(), F.BracketGallop(), F.ExpFromLeft())
-                b = @benchmark searchsortedlast($strat, $v, $x, $hint) samples = 200 evals = 50
+                b = @benchmark F.searchsorted_last($strat, $v, $x, $hint) samples = 200 evals = 50
                 @printf " | %10.2f  " minimum(b.times)
             end
             println()

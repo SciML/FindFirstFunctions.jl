@@ -14,15 +14,16 @@ This function does **not** assume `A` is sorted. For sorted vectors, see
 `DenseVector{Int64}`) or [`findequal`](@ref) (the strategy-framework
 equality wrapper that returns an `Int` with a sentinel).
 
-The `(x::Int64, A::DenseVector{Int64})` method uses a custom LLVM IR SIMD
-scan (load 8 lanes, `icmp eq`, `cttz` on the mask) — about 8× faster than
-the scalar `findfirst(==(x), v)` on modern x86-64. Every other element-type
+On 64-bit platforms the `(x::Int64, A::DenseVector{Int64})` method uses a
+custom LLVM IR SIMD scan (load 8 lanes, `icmp eq`, `cttz` on the mask) —
+about 8× faster than the scalar `findfirst(==(x), v)` on modern x86-64;
+on 32-bit platforms it uses a scalar loop. Every other element-type
 and array-storage combination falls back to `findfirst(isequal(x), A)`.
 """
 findfirstequal(vpivot, ivars) = findfirst(isequal(vpivot), ivars)
 function findfirstequal(vpivot::Int64, ivars::DenseVector{Int64})
     GC.@preserve ivars begin
-        ret = _findfirstequal(vpivot, pointer(ivars), length(ivars))
+        ret = _findfirstequal(vpivot, pointer(ivars), Int64(length(ivars)))
     end
     return ret < 0 ? nothing : ret + 1
 end
@@ -35,7 +36,10 @@ Find the index of the first occurrence of `var` in the sorted vector
 `DenseVector{Int64}` via a branchless binary bisection down to a small
 basecase, followed by the same SIMD equality scan that backs
 [`findfirstequal`](@ref) — faster than plain `findfirst(==(var), vars)`
-or `searchsortedfirst` + post-check for typical Int64 vectors.
+or `searchsortedfirst` + post-check for typical Int64 vectors. Every
+other element-type and array-storage combination (including native `Int`
+on 32-bit platforms, where `Int` is not `Int64`) falls back to a generic
+`searchsortedfirst` + equality post-check.
 
 The strategy-framework equivalent is
 [`findequal(BisectThenSIMD(), vars, var)`](@ref findequal); that wrapper
@@ -44,10 +48,14 @@ which is type-stable and composes with the rest of the strategy
 dispatch. Prefer `findequal` for new code; `findfirstsortedequal` remains
 as the dedicated `Union{Int64, Nothing}`-returning name.
 """
+function findfirstsortedequal(var, vars)
+    i = searchsortedfirst(vars, var)
+    return (i <= lastindex(vars) && isequal(@inbounds(vars[i]), var)) ? i : nothing
+end
 function findfirstsortedequal(
         var::Int64,
         vars::DenseVector{Int64},
-        ::Val{basecase} = Base.libllvm_version >= v"17" ? Val(8) : Val(128),
+        ::Val{basecase} = VERSION >= v"1.12" ? Val(8) : Val(128),
     ) where {basecase}
     len = length(vars)
     offset = 0
@@ -67,7 +75,7 @@ function findfirstsortedequal(
     end
     # maybe occurs in vars[offset+1:offset+len]
     GC.@preserve vars begin
-        ret = _findfirstequal(var, pointer(vars) + 8offset, len)
+        ret = _findfirstequal(var, pointer(vars) + 8offset, Int64(len))
     end
     return ret < 0 ? nothing : ret + offset + 1
 end

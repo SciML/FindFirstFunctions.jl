@@ -246,7 +246,7 @@ BenchmarkTools.Trial: 10000 samples with 1 evaluation.
  Memory estimate: 0 bytes, allocs estimate: 0.
 ```
 The branches in a binary search are unpredictable, thus disabling the conversion of `cmov` into branches results in a substantial performance increase.
-Additionally, enablig `cmov` (i.e., disabling `cmov` conversion) greatly reduces the optimal base case size for `FindFirstFunctions.findfirstsortedequal`. Without `cmov`, we need a very large base case to avoid too many branches, scanning large swaths contiguously.
+Additionally, enabling `cmov` (i.e., disabling `cmov` conversion) greatly reduces the optimal base case size for `FindFirstFunctions.findfirstsortedequal`. Without `cmov`, we need a very large base case to avoid too many branches, scanning large swaths contiguously.
 With `cmov`, we can reduce the base case size to `8`, taking several additional binary search steps without incurring heavy branch prediction penalties.
 
 However, we default to a large base case size, under the assumptions users are not setting this `ENV` variable; we assume that an expert user concerned about binary search performance who sets this variable will also be able to choose their own basecase size.

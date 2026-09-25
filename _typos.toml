@@ -1,0 +1,7 @@
+# Domain-specific words that are not typos:
+# - strat/STRAT: shorthand identifier for "strategy" used throughout benchmarks/NEWS
+# - olt: LLVM IR floating-point comparison predicate ("ordered less than")
+[default.extend-words]
+strat = "strat"
+STRAT = "STRAT"
+olt = "olt"

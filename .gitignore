@@ -4,3 +4,4 @@ docs/build
 docs/Manifest.toml
 docs/src/assets/Manifest.toml
 docs/src/assets/Project.toml
+test/qa/Manifest.toml

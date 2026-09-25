@@ -1,0 +1,914 @@
+# Kernel functions for each singleton strategy. Each kernel is a free
+# function that performs the strategy's algorithm directly — no method
+# dispatch, no Union returns, no wrapper struct.
+#
+# The kernels are called from the enum dispatcher in `kinds.jl`. `Auto`
+# and `GuesserHint` also call them (directly, by kind, for `Auto`; via
+# the kind dispatcher, for `GuesserHint`). `LinearBinarySearch{MAX}` is
+# parametric, so its kernels take a trailing `Val{MAX}` and are called
+# from its struct entry points in `strategy_kind.jl` instead of from the
+# enum dispatcher.
+
+# ===========================================================================
+# Bracket helpers — backing `BracketGallop`
+# ===========================================================================
+
+# Expanding-binary-search bracket around a guess. The `searchsortedlast`
+# polarity: when `x == v[guess]`, the answer is `>= guess` (gallop right).
+function bracketstrictlymonotonic(
+        v::AbstractVector,
+        x,
+        guess::T,
+        o::Base.Order.Ordering,
+    )::NTuple{2, keytype(v)} where {T <: Integer}
+    bottom = firstindex(v)
+    top = lastindex(v)
+    if guess < bottom || guess > top
+        return bottom, top
+    else
+        u = T(1)
+        lo, hi = guess, min(guess + u, top)
+        @inbounds if Base.Order.lt(o, x, v[lo])
+            while lo > bottom && Base.Order.lt(o, x, v[lo])
+                lo, hi = max(bottom, lo - u), lo
+                u += u
+            end
+        else
+            while hi < top && !Base.Order.lt(o, x, v[hi])
+                lo, hi = hi, min(top, hi + u)
+                u += u
+            end
+        end
+    end
+    return lo, hi
+end
+
+# Companion to `bracketstrictlymonotonic` for the `searchsortedfirst`
+# polarity. When `x == v[lo]` the answer is `<= lo` (look for earlier
+# duplicates) — so we use the inverted polarity `lt(o, v[lo], x)`.
+function bracketstrictlymonotonic_first(
+        v::AbstractVector,
+        x,
+        guess::T,
+        o::Base.Order.Ordering,
+    )::NTuple{2, keytype(v)} where {T <: Integer}
+    bottom = firstindex(v)
+    top = lastindex(v)
+    if guess < bottom || guess > top
+        return bottom, top
+    else
+        u = T(1)
+        lo, hi = guess, min(guess + u, top)
+        @inbounds if !Base.Order.lt(o, v[lo], x)
+            while lo > bottom && !Base.Order.lt(o, v[lo], x)
+                lo, hi = max(bottom, lo - u), lo
+                u += u
+            end
+        else
+            while hi < top && Base.Order.lt(o, v[hi], x)
+                lo, hi = hi, min(top, hi + u)
+                u += u
+            end
+        end
+    end
+    return lo, hi
+end
+
+# ===========================================================================
+# Exponential-search helpers — backing `ExpFromLeft`
+# ===========================================================================
+
+# Finds the smallest index `y` in `[lo, hi]` with `!lt(order, v[y], x)`.
+Base.@propagate_inbounds function searchsortedfirstexp(
+        v::AbstractVector,
+        x,
+        lo::Integer = firstindex(v),
+        hi::Integer = lastindex(v),
+        order::Base.Order.Ordering = Base.Order.Forward,
+    )
+    for i in 0:4
+        ind = lo + i
+        ind > hi && return ind
+        !Base.Order.lt(order, v[ind], x) && return ind
+    end
+    n = 3
+    tn2 = 2^n
+    tn2m1 = 2^(n - 1)
+    ind = lo + tn2
+    while ind <= hi
+        !Base.Order.lt(order, v[ind], x) &&
+            return searchsortedfirst(v, x, lo + tn2 - tn2m1, ind, order)
+        tn2 *= 2
+        tn2m1 *= 2
+        ind = lo + tn2
+    end
+    return searchsortedfirst(v, x, lo + tn2 - tn2m1, hi, order)
+end
+
+# Finds the largest `y` in `[lo, hi]` with `!lt(order, x, v[y])`.
+Base.@propagate_inbounds function searchsortedlastexp(
+        v::AbstractVector,
+        x,
+        lo::Integer = firstindex(v),
+        hi::Integer = lastindex(v),
+        order::Base.Order.Ordering = Base.Order.Forward,
+    )
+    for i in 0:4
+        ind = lo + i
+        ind > hi && return hi
+        Base.Order.lt(order, x, v[ind]) && return ind - 1
+    end
+    n = 3
+    tn2 = 2^n
+    tn2m1 = 2^(n - 1)
+    ind = lo + tn2
+    while ind <= hi
+        Base.Order.lt(order, x, v[ind]) &&
+            return searchsortedlast(v, x, lo + tn2 - tn2m1, ind, order)
+        tn2 *= 2
+        tn2m1 *= 2
+        ind = lo + tn2
+    end
+    return searchsortedlast(v, x, lo + tn2 - tn2m1, hi, order)
+end
+
+# ===========================================================================
+# Kernel: BinaryBracket — plain `Base.searchsortedlast` / `Base.searchsortedfirst`.
+# ===========================================================================
+
+@inline _kernel_last_binary_bracket(v::AbstractVector, x, order::Base.Order.Ordering) =
+    searchsortedlast(v, x, order)
+@inline _kernel_first_binary_bracket(v::AbstractVector, x, order::Base.Order.Ordering) =
+    searchsortedfirst(v, x, order)
+
+# ===========================================================================
+# Kernel: LinearScan — walk ±1 from the hint.
+# ===========================================================================
+
+function _kernel_last_linear_scan(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    if hi < lo
+        return lo - 1   # empty vector
+    end
+    i = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, x, v[i])
+        # v[i] > x → retreat
+        while i > lo
+            i -= 1
+            !Base.Order.lt(order, x, v[i]) && return i
+        end
+        return lo - 1   # x precedes all of v
+    else
+        # v[i] ≤ x → try to advance
+        while i < hi
+            Base.Order.lt(order, x, v[i + 1]) && return i
+            i += 1
+        end
+        return hi
+    end
+end
+
+function _kernel_first_linear_scan(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    if hi < lo
+        return lo
+    end
+    i = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, v[i], x)
+        # v[i] < x → advance
+        while i < hi
+            i += 1
+            !Base.Order.lt(order, v[i], x) && return i
+        end
+        return hi + 1   # x exceeds all of v
+    else
+        # v[i] ≥ x → try to retreat
+        while i > lo
+            !Base.Order.lt(order, v[i - 1], x) && (i -= 1; continue)
+            return i
+        end
+        return lo
+    end
+end
+
+# ===========================================================================
+# Kernel: SIMDLinearScan — specialized forward walk for DenseVector{Int64}
+# and DenseVector{Float64}. Falls back to scalar LinearScan otherwise.
+# ===========================================================================
+
+@inline function _simdscan_last_specialized(
+        v::Union{DenseVector{Int64}, DenseVector{Float64}},
+        x, hint::Integer,
+        order::Base.Order.Ordering,
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo - 1
+    i = clamp(hint, lo, hi)
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, x, vi)
+        # `v[i]` is past the answer in this ordering — backward walk (scalar).
+        while i > lo
+            i -= 1
+            @inbounds !Base.Order.lt(order, x, v[i]) && return i
+        end
+        return lo - 1
+    end
+    i == hi && return hi
+    start = i + 1
+    len = hi - start + 1
+    offset = if order === Base.Order.Forward
+        GC.@preserve v _simd_first_gt(x, pointer(v, start), Int64(len))
+    else
+        GC.@preserve v _simd_first_lt(x, pointer(v, start), Int64(len))
+    end
+    return offset < 0 ? hi : (start + offset) - 1
+end
+
+@inline function _simdscan_first_specialized(
+        v::Union{DenseVector{Int64}, DenseVector{Float64}},
+        x, hint::Integer,
+        order::Base.Order.Ordering,
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo
+    i = clamp(hint, lo, hi)
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, vi, x)
+        i == hi && return hi + 1
+        start = i + 1
+        len = hi - start + 1
+        offset = if order === Base.Order.Forward
+            GC.@preserve v _simd_first_ge(x, pointer(v, start), Int64(len))
+        else
+            GC.@preserve v _simd_first_le(x, pointer(v, start), Int64(len))
+        end
+        return offset < 0 ? hi + 1 : start + offset
+    end
+    while i > lo
+        @inbounds Base.Order.lt(order, v[i - 1], x) && return i
+        i -= 1
+    end
+    return lo
+end
+
+# Whether the ordering is one of the two ordering singletons SIMD supports.
+@inline function _simd_supported_order(order::Base.Order.Ordering)
+    return order === Base.Order.Forward || order === Base.Order.Reverse
+end
+
+# Static-dispatch entry: Int64 and Float64 dense vectors get the SIMD path
+# (under supported orderings); everything else falls back to scalar LinearScan.
+@inline function _kernel_last_simd_linear_scan(
+        v::DenseVector{Int64}, x::Int64, hint::Integer, order::Base.Order.Ordering,
+    )
+    _simd_supported_order(order) ||
+        return _kernel_last_linear_scan(v, x, hint, order)
+    return _simdscan_last_specialized(v, x, hint, order)
+end
+@inline function _kernel_last_simd_linear_scan(
+        v::DenseVector{Float64}, x::Float64, hint::Integer, order::Base.Order.Ordering,
+    )
+    _simd_supported_order(order) ||
+        return _kernel_last_linear_scan(v, x, hint, order)
+    return _simdscan_last_specialized(v, x, hint, order)
+end
+@inline _kernel_last_simd_linear_scan(
+    v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+) = _kernel_last_linear_scan(v, x, hint, order)
+
+@inline function _kernel_first_simd_linear_scan(
+        v::DenseVector{Int64}, x::Int64, hint::Integer, order::Base.Order.Ordering,
+    )
+    _simd_supported_order(order) ||
+        return _kernel_first_linear_scan(v, x, hint, order)
+    return _simdscan_first_specialized(v, x, hint, order)
+end
+@inline function _kernel_first_simd_linear_scan(
+        v::DenseVector{Float64}, x::Float64, hint::Integer, order::Base.Order.Ordering,
+    )
+    _simd_supported_order(order) ||
+        return _kernel_first_linear_scan(v, x, hint, order)
+    return _simdscan_first_specialized(v, x, hint, order)
+end
+@inline _kernel_first_simd_linear_scan(
+    v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+) = _kernel_first_linear_scan(v, x, hint, order)
+
+# ===========================================================================
+# Kernel: BracketGallop — bracketstrictlymonotonic + bounded binary search.
+# ===========================================================================
+
+@inline function _kernel_last_bracket_gallop(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo, hi = bracketstrictlymonotonic(v, x, hint, order)
+    return searchsortedlast(v, x, lo, hi, order)
+end
+
+@inline function _kernel_first_bracket_gallop(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo, hi = bracketstrictlymonotonic_first(v, x, hint, order)
+    return searchsortedfirst(v, x, lo, hi, order)
+end
+
+# ===========================================================================
+# Kernel: ExpFromLeft — galloping forward from a left-bound hint.
+# ===========================================================================
+
+function _kernel_first_exp_from_left(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    if isempty(v)
+        return lo
+    end
+    h = clamp(hint, lo, hi)
+    @inbounds if !Base.Order.lt(order, v[h], x)
+        return searchsortedfirst(v, x, order)
+    end
+    return searchsortedfirstexp(v, x, h, hi, order)
+end
+
+function _kernel_last_exp_from_left(
+        v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
+    )
+    lo = firstindex(v)
+    hi = lastindex(v)
+    if isempty(v)
+        return lo - 1
+    end
+    h = clamp(hint, lo, hi)
+    @inbounds if Base.Order.lt(order, x, v[h])
+        return searchsortedlast(v, x, order)
+    end
+    return searchsortedlastexp(v, x, h, hi, order)
+end
+
+# ===========================================================================
+# Kernel: InterpolationSearch — extrapolate a guess + bounded binary search.
+# ===========================================================================
+
+@inline function _interp_guess(v::AbstractVector, x, lo::Integer, hi::Integer)
+    @inbounds vlo = v[lo]
+    @inbounds vhi = v[hi]
+    span = vhi - vlo
+    iszero(span) && return lo
+    f = (x - vlo) / span
+    if !isfinite(f)
+        return f > 0 ? hi : lo
+    end
+    g = lo + round(Int, f * (hi - lo))
+    return clamp(g, lo, hi)
+end
+
+function _kernel_last_interpolation_search_numeric(
+        v::AbstractVector{<:Number}, x::Number, order::Base.Order.Ordering,
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo - 1
+    g = _interp_guess(v, x, lo, hi)
+    return _kernel_last_bracket_gallop(v, x, g, order)
+end
+
+function _kernel_first_interpolation_search_numeric(
+        v::AbstractVector{<:Number}, x::Number, order::Base.Order.Ordering,
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo
+    g = _interp_guess(v, x, lo, hi)
+    return _kernel_first_bracket_gallop(v, x, g, order)
+end
+
+@inline _kernel_last_interpolation_search(
+    v::AbstractVector{<:Number}, x::Number, order::Base.Order.Ordering,
+) = _kernel_last_interpolation_search_numeric(v, x, order)
+@inline _kernel_last_interpolation_search(
+    v::AbstractVector, x, order::Base.Order.Ordering,
+) = _kernel_last_binary_bracket(v, x, order)
+
+@inline _kernel_first_interpolation_search(
+    v::AbstractVector{<:Number}, x::Number, order::Base.Order.Ordering,
+) = _kernel_first_interpolation_search_numeric(v, x, order)
+@inline _kernel_first_interpolation_search(
+    v::AbstractVector, x, order::Base.Order.Ordering,
+) = _kernel_first_binary_bracket(v, x, order)
+
+# ===========================================================================
+# Kernel: BitInterpolationSearch — InterpolationSearch on IEEE bit pattern
+# of positive Float64.
+# ===========================================================================
+
+@inline function _bit_interp_guess_f64(
+        v::DenseVector{Float64}, x::Float64, lo::Integer, hi::Integer,
+        order::Base.Order.Ordering,
+    )
+    @inbounds vlo_bits = reinterpret(UInt64, v[lo])
+    @inbounds vhi_bits = reinterpret(UInt64, v[hi])
+    xu = reinterpret(UInt64, x)
+    return if order === Base.Order.Forward
+        span = vhi_bits - vlo_bits
+        if iszero(span)
+            lo
+        elseif xu <= vlo_bits
+            lo
+        elseif xu >= vhi_bits
+            hi
+        else
+            num = xu - vlo_bits
+            f = Float64(num) / Float64(span)
+            clamp(lo + round(Int, f * (hi - lo)), lo, hi)
+        end
+    else
+        span = vlo_bits - vhi_bits
+        if iszero(span)
+            lo
+        elseif xu >= vlo_bits
+            lo
+        elseif xu <= vhi_bits
+            hi
+        else
+            num = vlo_bits - xu
+            f = Float64(num) / Float64(span)
+            clamp(lo + round(Int, f * (hi - lo)), lo, hi)
+        end
+    end
+end
+
+@inline function _bit_interp_eligible(v::DenseVector{Float64}, x::Float64, lo, hi, order)
+    _simd_supported_order(order) || return false
+    @inbounds return v[lo] > 0.0 && isfinite(v[lo]) &&
+        v[hi] > 0.0 && isfinite(v[hi]) &&
+        x > 0.0 && isfinite(x)
+end
+
+function _kernel_last_bit_interpolation_search_f64(
+        v::DenseVector{Float64}, x::Float64, order::Base.Order.Ordering,
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo - 1
+    _bit_interp_eligible(v, x, lo, hi, order) ||
+        return _kernel_last_binary_bracket(v, x, order)
+    g = _bit_interp_guess_f64(v, x, lo, hi, order)
+    return _kernel_last_bracket_gallop(v, x, g, order)
+end
+
+function _kernel_first_bit_interpolation_search_f64(
+        v::DenseVector{Float64}, x::Float64, order::Base.Order.Ordering,
+    )
+    lo, hi = firstindex(v), lastindex(v)
+    hi < lo && return lo
+    _bit_interp_eligible(v, x, lo, hi, order) ||
+        return _kernel_first_binary_bracket(v, x, order)
+    g = _bit_interp_guess_f64(v, x, lo, hi, order)
+    return _kernel_first_bracket_gallop(v, x, g, order)
+end
+
+@inline _kernel_last_bit_interpolation_search(
+    v::DenseVector{Float64}, x::Float64, order::Base.Order.Ordering,
+) = _kernel_last_bit_interpolation_search_f64(v, x, order)
+@inline _kernel_last_bit_interpolation_search(
+    v::AbstractVector, x, order::Base.Order.Ordering,
+) = _kernel_last_interpolation_search(v, x, order)
+
+@inline _kernel_first_bit_interpolation_search(
+    v::DenseVector{Float64}, x::Float64, order::Base.Order.Ordering,
+) = _kernel_first_bit_interpolation_search_f64(v, x, order)
+@inline _kernel_first_bit_interpolation_search(
+    v::AbstractVector, x, order::Base.Order.Ordering,
+) = _kernel_first_interpolation_search(v, x, order)
+
+# ===========================================================================
+# Kernel: UniformStep — O(1) closed-form lookup for AbstractRange.
+# ===========================================================================
+
+@inline _uniformstep_supported_order(::Base.Order.ForwardOrdering) = true
+@inline _uniformstep_supported_order(::Base.Order.ReverseOrdering) = true
+@inline _uniformstep_supported_order(::Base.Order.Ordering) = false
+
+@inline function _uniformstep_searchsortedlast(
+        r::AbstractRange, x, order::Base.Order.Ordering,
+    )
+    isempty(r) && return firstindex(r) - 1
+    s = step(r)
+    iszero(s) && return lastindex(r)
+    diff = x - first(r)
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (firstindex(r) - 1) :
+            (diff > 0) ⊻ (s < 0) ? lastindex(r) : firstindex(r) - 1
+    end
+    nm1 = length(r) - 1
+    f = fld(diff, s)
+    i = if f < 0
+        firstindex(r) - 1
+    elseif f >= nm1
+        lastindex(r)
+    else
+        firstindex(r) + Int(f)
+    end
+    @inbounds if i < lastindex(r) && !Base.Order.lt(order, x, r[i + 1])
+        return i + 1
+    elseif i >= firstindex(r) && i <= lastindex(r) && Base.Order.lt(order, x, r[i])
+        return i - 1
+    end
+    return i
+end
+
+@inline function _uniformstep_searchsortedfirst(
+        r::AbstractRange, x, order::Base.Order.Ordering,
+    )
+    isempty(r) && return firstindex(r)
+    s = step(r)
+    iszero(s) && return firstindex(r)
+    diff = x - first(r)
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (lastindex(r) + 1) :
+            (diff > 0) ⊻ (s < 0) ? lastindex(r) + 1 : firstindex(r)
+    end
+    nm1 = length(r) - 1
+    f = cld(diff, s)
+    i = if f <= 0
+        firstindex(r)
+    elseif f > nm1
+        lastindex(r) + 1
+    else
+        firstindex(r) + Int(f)
+    end
+    @inbounds if i > firstindex(r) && i <= lastindex(r) + 1 &&
+            !Base.Order.lt(order, r[i - 1], x)
+        return i - 1
+    end
+    @inbounds if i <= lastindex(r) && Base.Order.lt(order, r[i], x)
+        return i + 1
+    end
+    return i
+end
+
+@inline _kernel_last_uniform_step(
+    v::AbstractRange, x, order::Base.Order.Ordering,
+) = _uniformstep_supported_order(order) ?
+    _uniformstep_searchsortedlast(v, x, order) :
+    _kernel_last_binary_bracket(v, x, order)
+@inline _kernel_last_uniform_step(
+    v::AbstractVector, x, order::Base.Order.Ordering,
+) = _kernel_last_binary_bracket(v, x, order)
+
+@inline _kernel_first_uniform_step(
+    v::AbstractRange, x, order::Base.Order.Ordering,
+) = _uniformstep_supported_order(order) ?
+    _uniformstep_searchsortedfirst(v, x, order) :
+    _kernel_first_binary_bracket(v, x, order)
+@inline _kernel_first_uniform_step(
+    v::AbstractVector, x, order::Base.Order.Ordering,
+) = _kernel_first_binary_bracket(v, x, order)
+
+# ===========================================================================
+# Props-aware UniformStep — closed-form O(1) lookup using a precomputed
+# `inv_step` baked into `SearchProperties{T}`. The per-query float
+# division `fld(diff, step)` is hoisted to
+# `SearchProperties` construction time, leaving the hot path with one
+# subtract, one multiply, one truncate, plus a bounds clamp and a one-step
+# roundoff correction.
+#
+# Both `Forward` and `Reverse` orderings are supported — the sign of
+# `inv_step` carries the direction. Any other ordering falls back to
+# BinaryBracket.
+# ===========================================================================
+
+# Truncate a guess coordinate `f` to an `Int` offset. The caller has already
+# clamped `f` to `[0, nm1)` (last) / `(0, nm1]` (first), so on the hardware
+# floats the fast `unsafe_trunc` is in-range and skips a redundant check.
+# Other ordered-`Real` ratio types — `Rational`, AD `Dual`, `BigFloat`, … —
+# do not all define `unsafe_trunc`, so fall back to the checked
+# `floor(Int, ·)` / `ceil(Int, ·)`, which every such type supports and which
+# is exact for the in-range `f`. The hardware-float union is spelled out
+# rather than via the non-public `Base.IEEEFloat` alias.
+const _HardwareFloat = Union{Float16, Float32, Float64}
+@inline _uniform_floor_index(f::_HardwareFloat) = unsafe_trunc(Int, floor(f))
+@inline _uniform_floor_index(f) = floor(Int, f)
+@inline _uniform_ceil_index(f::_HardwareFloat) = unsafe_trunc(Int, ceil(f))
+@inline _uniform_ceil_index(f) = ceil(Int, f)
+
+@inline function _kernel_last_uniform_step_props(
+        props::SearchProperties, v::AbstractVector, x, order::Base.Order.Ordering,
+    )
+    _uniformstep_supported_order(order) ||
+        return _kernel_last_binary_bracket(v, x, order)
+    isempty(v) && return firstindex(v) - 1
+    diff = x - props.first_val
+    if diff isa AbstractFloat && !isfinite(diff)
+        # NaN → "x precedes nothing"; ±Inf direction depends on sign of step.
+        # `inv_step < 0` iff the range is decreasing.
+        return isnan(diff) ? (firstindex(v) - 1) :
+            (diff > 0) ⊻ (props.inv_step < 0) ? lastindex(v) :
+            firstindex(v) - 1
+    end
+    nm1 = length(v) - 1
+    f = diff * props.inv_step
+    # Clamp in the float domain before truncating: `f` can exceed
+    # `typemax(Int)` for finite extreme `x`, where `unsafe_trunc` is UB.
+    # `f` is NaN when `diff == 0` and `inv_step == Inf` (caller-supplied
+    # `is_uniform = true` on a zero-span vector).
+    isnan(f) && return _kernel_last_binary_bracket(v, x, order)
+    i = if f < 0
+        firstindex(v) - 1
+    elseif f >= nm1
+        lastindex(v)
+    else
+        firstindex(v) + _uniform_floor_index(f)
+    end
+    # Walk to the true cell. For exactly-uniform data this takes at most
+    # one step (float roundoff); it also keeps the result correct when
+    # `is_uniform` came from the sampled probe but the data is not
+    # uniform between the sampled points.
+    @inbounds while i < lastindex(v) && !Base.Order.lt(order, x, v[i + 1])
+        i += 1
+    end
+    @inbounds while i >= firstindex(v) && Base.Order.lt(order, x, v[i])
+        i -= 1
+    end
+    return i
+end
+
+@inline function _kernel_first_uniform_step_props(
+        props::SearchProperties, v::AbstractVector, x, order::Base.Order.Ordering,
+    )
+    _uniformstep_supported_order(order) ||
+        return _kernel_first_binary_bracket(v, x, order)
+    isempty(v) && return firstindex(v)
+    diff = x - props.first_val
+    if diff isa AbstractFloat && !isfinite(diff)
+        return isnan(diff) ? (lastindex(v) + 1) :
+            (diff > 0) ⊻ (props.inv_step < 0) ? lastindex(v) + 1 :
+            firstindex(v)
+    end
+    nm1 = length(v) - 1
+    f = diff * props.inv_step
+    isnan(f) && return _kernel_first_binary_bracket(v, x, order)
+    i = if f <= 0
+        firstindex(v)
+    elseif f > nm1
+        lastindex(v) + 1
+    else
+        firstindex(v) + _uniform_ceil_index(f)
+    end
+    @inbounds while i > firstindex(v) && !Base.Order.lt(order, v[i - 1], x)
+        i -= 1
+    end
+    @inbounds while i <= lastindex(v) && Base.Order.lt(order, v[i], x)
+        i += 1
+    end
+    return i
+end
+
+# ===========================================================================
+# Kernel: LinearBinarySearch{MAX} — bounded linear walk from the hint with
+# binary fallback. Static MAX type parameter lets the walk be fully unrolled
+# for small MAX (≤ `_LBS_UNROLL_THRESHOLD`) and lets the binary fallback
+# call site specialize per-MAX. The walks themselves are order-aware
+# and use the same `Base.Order.lt` predicate as `LinearScan` so Forward and
+# Reverse orderings share one code path.
+#
+# Unroll threshold = 16: matches the FastInterpolations.jl reference
+# implementation. For MAX ≤ 16 the fully unrolled walk produces flat
+# branchless-ish code that LLVM can fold tightly; for larger MAX the
+# unrolled version balloons (e.g. MAX = 128 → ~256 instructions per walk
+# direction), so we fall back to a bounded while-loop that's still fast
+# but compiles to a fixed code size.
+#
+# Unlike the singleton kernels above, these take a trailing `Val{MAX}` and
+# are called from the `LinearBinarySearch` struct entry points in
+# `strategy_kind.jl` — no single `StrategyKind` tag can represent every
+# `MAX`, so the enum dispatcher is bypassed (same reason `GuesserHint`
+# keeps its own multimethods).
+# ===========================================================================
+
+const _LBS_UNROLL_THRESHOLD = 16
+
+# Walk forward from `i` for up to MAX steps with the `searchsorted_last`
+# polarity. Returns `(idx, found)`: `found = true` means the answer is `idx`,
+# `found = false` means we walked off the end of the window without
+# bracketing `x` and the caller should run a binary fallback on the
+# remaining range.
+#
+# Semantics: `MAX` covers gaps `0..MAX`. The first comparison resolves
+# gap = 0 (hint is already the answer); each subsequent comparison
+# advances one index. After `MAX` advances the walk has tested positions
+# `hint..hint+MAX`. The final `i == hi` check inside the loop catches the
+# "answer is at the array boundary" case without an extra comparison.
+@generated function _lbs_walk_forward_last(
+        v::AbstractVector, x, i::Integer, hi::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        # Initial check: hint itself may be the answer (gap = 0).
+        push!(
+            stmts, quote
+                i == hi && return (hi, true)
+                @inbounds Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+            end,
+        )
+        # MAX advance-then-check pairs: each covers one extra gap unit.
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i += 1
+                    i == hi && return (hi, true)
+                    @inbounds Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            i == hi && return (hi, true)
+            @inbounds Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+            stop = min(hi, i + $MAX)
+            @inbounds while i < stop
+                i += 1
+                i == hi && return (hi, true)
+                Base.Order.lt(order, x, v[i + 1]) && return (i, true)
+            end
+            return (i, false)
+        end
+    end
+end
+
+# Walk backward from `i` for up to MAX steps with the `searchsorted_last`
+# polarity. Returns `(idx, found)`. The hint is known to be past the answer
+# (`v[hint] > x`), so each step retreats and checks "is this index now the
+# answer?". After `MAX` retreats the walk has covered up to `MAX` gaps.
+@generated function _lbs_walk_backward_last(
+        v::AbstractVector, x, i::Integer, lo::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i <= lo && return (lo - 1, true)
+                    i -= 1
+                    @inbounds !Base.Order.lt(order, x, v[i]) && return (i, true)
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            stop = max(lo, i - $MAX)
+            @inbounds while i > stop
+                i -= 1
+                !Base.Order.lt(order, x, v[i]) && return (i, true)
+            end
+            i == lo && !Base.Order.lt(order, x, @inbounds(v[lo])) && return (lo, true)
+            i == lo && return (lo - 1, true)
+            return (i, false)
+        end
+    end
+end
+
+# Companion walks for the `searchsorted_first` polarity (smallest i with
+# `!lt(order, v[i], x)`). The forward walk advances while `v[i] < x`; the
+# backward walk retreats while `v[i-1] >= x`. Same MAX-covers-MAX-gaps
+# semantics as the `_last` variants.
+@generated function _lbs_walk_forward_first(
+        v::AbstractVector, x, i::Integer, hi::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        # Initial check: hint may already satisfy the meets-or-passes
+        # condition (gap = 0).
+        push!(
+            stmts, quote
+                i > hi && return (hi + 1, true)
+                @inbounds !Base.Order.lt(order, v[i], x) && return (i, true)
+            end,
+        )
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i += 1
+                    i > hi && return (hi + 1, true)
+                    @inbounds !Base.Order.lt(order, v[i], x) && return (i, true)
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            i > hi && return (hi + 1, true)
+            @inbounds !Base.Order.lt(order, v[i], x) && return (i, true)
+            stop = min(hi + 1, i + $MAX)
+            @inbounds while i < stop
+                i += 1
+                i > hi && return (hi + 1, true)
+                !Base.Order.lt(order, v[i], x) && return (i, true)
+            end
+            return (i, false)
+        end
+    end
+end
+
+@generated function _lbs_walk_backward_first(
+        v::AbstractVector, x, i::Integer, lo::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    if MAX <= _LBS_UNROLL_THRESHOLD
+        stmts = Expr[]
+        for _ in 1:MAX
+            push!(
+                stmts, quote
+                    i <= lo && return (lo, true)
+                    @inbounds Base.Order.lt(order, v[i - 1], x) && return (i, true)
+                    i -= 1
+                end,
+            )
+        end
+        return quote
+            $(stmts...)
+            return (i, false)
+        end
+    else
+        return quote
+            stop = max(lo, i - $MAX)
+            @inbounds while i > stop
+                Base.Order.lt(order, v[i - 1], x) && return (i, true)
+                i -= 1
+            end
+            i == lo && return (lo, true)
+            return (i, false)
+        end
+    end
+end
+
+function _kernel_last_linear_binary_search(
+        v::AbstractVector, x, hint::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo - 1
+    if hint < lo || hint > hi
+        return searchsortedlast(v, x, order)
+    end
+    i = hint % Int
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, x, vi)
+        # Hint is past the answer — walk backward.
+        idx, found = _lbs_walk_backward_last(v, x, i, lo, order, Val(MAX))
+        found && return idx
+        # `idx` is the leftmost index visited by the walk; restrict the
+        # binary fallback to the remaining `[lo, idx]` range.
+        return searchsortedlast(v, x, lo, idx, order)
+    else
+        # Hint is at or before the answer — walk forward.
+        idx, found = _lbs_walk_forward_last(v, x, i, hi, order, Val(MAX))
+        found && return idx
+        return searchsortedlast(v, x, idx, hi, order)
+    end
+end
+
+function _kernel_first_linear_binary_search(
+        v::AbstractVector, x, hint::Integer,
+        order::Base.Order.Ordering, ::Val{MAX},
+    ) where {MAX}
+    lo = firstindex(v)
+    hi = lastindex(v)
+    hi < lo && return lo
+    if hint < lo || hint > hi
+        return searchsortedfirst(v, x, order)
+    end
+    i = hint % Int
+    @inbounds vi = v[i]
+    if Base.Order.lt(order, vi, x)
+        # Hint is before the answer — walk forward.
+        idx, found = _lbs_walk_forward_first(v, x, i, hi, order, Val(MAX))
+        found && return idx
+        return searchsortedfirst(v, x, idx, hi, order)
+    else
+        # Hint meets-or-passes the answer — walk backward to find the first
+        # occurrence (handles runs of duplicates).
+        idx, found = _lbs_walk_backward_first(v, x, i, lo, order, Val(MAX))
+        found && return idx
+        return searchsortedfirst(v, x, lo, idx, order)
+    end
+end

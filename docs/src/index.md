@@ -51,7 +51,7 @@ v = collect(0.0:0.1:10.0)
 queries = sort!(rand(100) .* 10)
 
 # Single query with a hint.
-i = searchsortedlast(BracketGallop(), v, 3.14, 30)
+i = searchsorted_last(BracketGallop(), v, 3.14, 30)
 
 # Batched, with strategy chosen by Auto.
 idx = Vector{Int}(undef, length(queries))
@@ -61,7 +61,7 @@ searchsortedlast!(idx, v, queries)
 ## Contributing
 
   - Please refer to the
-    [SciML ColPrac: Contributor's Guide on Collaborative Practices for Community Packages](https://github.com/SciML/ColPrac/blob/master/README.md)
+    [SciML ColPrac: Contributor's Guide on Collaborative Practices for Community Packages](https://sciml.github.io/ColPrac/stable/)
     for guidance on PRs, issues, and other matters relating to contributing to SciML.
 
   - See the [SciML Style Guide](https://github.com/SciML/SciMLStyle) for common coding practices and other style decisions.
