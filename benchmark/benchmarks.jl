@@ -65,6 +65,31 @@ end
 # Batched in-place benchmarks: a small grid of (v_kind, q_kind, n, m).
 # Auto vs hand-picked strategies, plus the queries_sorted = true fast path.
 # ---------------------------------------------------------------------------
+# Warm-started walk: each query's hint is the previous answer, and consecutive
+# queries move by a fraction of an interval (the interpolation-lookup pattern).
+# BracketGallop's hit fast path is what this cell measures; LinearScan is the
+# reference for a hint that is right most of the time.
+SUITE["warm_walk"] = BenchmarkGroup()
+let v = _make_v(:random_sorted, 100_000), rng = StableRNG(7), nq = 4096
+    xs = Vector{Float64}(undef, nq)
+    x = v[1]
+    for k in 1:nq
+        i = clamp(searchsortedlast(v, x), 1, length(v) - 1)
+        x = clamp(x + (rand(rng) < 0.01 ? (rand(rng) - 0.5) * 200 : rand(rng) * 0.35) * (v[i + 1] - v[i]), v[1], v[end])
+        xs[k] = x
+    end
+    function walk(strategy, v, xs)
+        idx = 1; s = 0
+        for x in xs
+            idx = searchsorted_last(strategy, v, x, idx); s += idx
+        end
+        return s
+    end
+    for (name, strategy) in (("BracketGallop", BracketGallop()), ("LinearScan", LinearScan()), ("Auto", Auto()))
+        SUITE["warm_walk"][name] = @benchmarkable($walk($strategy, $v, $xs))
+    end
+end
+
 SUITE["batched"] = BenchmarkGroup()
 for v_kind in (:uniform, :logspaced, :random_sorted),
         q_kind in (:dense, :sparse, :clustered),

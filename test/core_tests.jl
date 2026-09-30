@@ -294,6 +294,38 @@ end
     end
 end
 
+@safetestset "BracketGallop hint hit fast path" begin
+    using FindFirstFunctions: BracketGallop, searchsorted_last, searchsorted_first
+    using StableRNGs
+
+    # The hit fast path returns the hint after two comparisons when it is the
+    # answer. It must agree with Base for every hint (in and out of range), for
+    # duplicates (an equal neighbour must fall through to the bisection), at both
+    # ends of the vector, and under a reverse ordering.
+    rng = StableRNG(2026)
+    for trial in 1:300
+        n = rand(rng, 1:40)
+        v = sort!(rand(rng, Bool) ? rand(rng, n) .* 10 : round.(rand(rng, n) .* 10; digits = 0))
+        for x in (v[rand(rng, 1:n)], v[rand(rng, 1:n)] + eps(10.0), rand(rng) * 12 - 1, -1.0, 11.0),
+                h in -2:(n + 2)
+            @test searchsorted_last(BracketGallop(), v, x, h) == searchsortedlast(v, x)
+            @test searchsorted_first(BracketGallop(), v, x, h) == searchsortedfirst(v, x)
+        end
+        v_rev = reverse(v)
+        for x in (v[rand(rng, 1:n)], rand(rng) * 12 - 1), h in (0, 1, (n + 1) ÷ 2, n, n + 1)
+            @test searchsorted_last(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
+                searchsortedlast(v_rev, x, Base.Order.Reverse)
+            @test searchsorted_first(BracketGallop(), v_rev, x, h; order = Base.Order.Reverse) ==
+                searchsortedfirst(v_rev, x, Base.Order.Reverse)
+        end
+    end
+
+    # Integer hint of a different width returns the vector's index type.
+    v = collect(1.0:10.0)
+    @test searchsorted_last(BracketGallop(), v, 3.5, Int32(3)) === 3
+    @test searchsorted_first(BracketGallop(), v, 3.5, Int32(4)) === 4
+end
+
 @safetestset "SearchStrategy dispatch (single query)" begin
     using FindFirstFunctions:
         SearchStrategy, LinearScan, BracketGallop, BinaryBracket, Auto,
