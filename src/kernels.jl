@@ -301,18 +301,143 @@ end
 # Kernel: BracketGallop — bracketstrictlymonotonic + bounded binary search.
 # ===========================================================================
 
+# The hinted kernels are one pass each: the two comparisons at the hint decide
+# a hit (a correlated caller — an interpolation interval lookup feeding each
+# answer back as the next hint — hits most of the time), and on a miss the
+# gallop continues from what those comparisons established instead of
+# starting over, doubling its step until it brackets the answer, then a
+# bisection that knows one end of the bracket is a valid candidate finishes.
+# The earlier two-stage form (`bracketstrictlymonotonic` + Base's bounded
+# bisection) re-read the hint's neighbours on a miss and, on a hit, ran the
+# bisection over a width-one bracket — two more comparisons and loads per
+# query, which measured 2× on a warm-started interval search. Duplicates are
+# handled by the predicates themselves: `searchsortedlast` asks for the last
+# `v[i] ≤ x`, so an equal right neighbour is not a hit and the gallop moves on.
+
+# Largest `i` in `[lo, hi]` with `!lt(o, x, v[i])`, given that `lo` satisfies it.
+@inline function _bisect_last_from(v::AbstractVector, x, lo, hi, o::Base.Order.Ordering)
+    @inbounds while lo < hi
+        m = lo + ((hi - lo + 1) >> 1)   # upper midpoint, overflow-safe
+        if Base.Order.lt(o, x, v[m])
+            hi = m - 1
+        else
+            lo = m
+        end
+    end
+    return lo
+end
+
+# Smallest `i` in `[lo, hi]` with `!lt(o, v[i], x)`, given that `hi` satisfies it.
+@inline function _bisect_first_to(v::AbstractVector, x, lo, hi, o::Base.Order.Ordering)
+    @inbounds while lo < hi
+        m = lo + ((hi - lo) >> 1)       # lower midpoint, overflow-safe
+        if Base.Order.lt(o, v[m], x)
+            lo = m + 1
+        else
+            hi = m
+        end
+    end
+    return hi
+end
+
 @inline function _kernel_last_bracket_gallop(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
-    lo, hi = bracketstrictlymonotonic(v, x, hint, order)
-    return searchsortedlast(v, x, lo, hi, order)
+    bottom, top = firstindex(v), lastindex(v)
+    (bottom <= hint <= top) || return searchsortedlast(v, x, order)
+    g = convert(keytype(v), hint)
+    @inbounds if !Base.Order.lt(order, x, v[g])
+        # v[g] ≤ x: the answer is at or after g.
+        g == top && return g
+        Base.Order.lt(order, x, v[g + 1]) && return g          # hit
+        lo = g + 1                                            # v[lo] ≤ x
+        hi = top
+        u = one(lo)
+        while true
+            nxt = lo + u
+            nxt >= top && break                               # v[top] undecided; the bisection settles it
+            if Base.Order.lt(order, x, v[nxt])
+                hi = nxt - 1
+                break
+            end
+            lo = nxt
+            u += u
+        end
+        return _bisect_last_from(v, x, lo, hi, order)
+    else
+        # x < v[g]: the answer is before g.
+        g == bottom && return bottom - one(g)
+        hi = g - 1                                            # x < v[hi + 1]
+        u = one(hi)
+        local lo
+        while true
+            prv = hi - u
+            if prv <= bottom
+                Base.Order.lt(order, x, v[bottom]) && return bottom - one(g)
+                lo = bottom
+                break
+            end
+            if Base.Order.lt(order, x, v[prv])
+                hi = prv - 1
+                u += u
+            else
+                lo = prv                                      # v[lo] ≤ x
+                break
+            end
+        end
+        return _bisect_last_from(v, x, lo, hi, order)
+    end
 end
 
+# `searchsortedfirst` polarity: the hint is a hit when `v[hint - 1] < x ≤ v[hint]`;
+# an earlier duplicate of `x` fails that test and the gallop moves left.
 @inline function _kernel_first_bracket_gallop(
         v::AbstractVector, x, hint::Integer, order::Base.Order.Ordering,
     )
-    lo, hi = bracketstrictlymonotonic_first(v, x, hint, order)
-    return searchsortedfirst(v, x, lo, hi, order)
+    bottom, top = firstindex(v), lastindex(v)
+    (bottom <= hint <= top) || return searchsortedfirst(v, x, order)
+    g = convert(keytype(v), hint)
+    @inbounds if !Base.Order.lt(order, v[g], x)
+        # x ≤ v[g]: the answer is at or before g.
+        g == bottom && return g
+        Base.Order.lt(order, v[g - 1], x) && return g          # hit
+        hi = g - 1                                            # x ≤ v[hi]
+        lo = bottom
+        u = one(hi)
+        while true
+            prv = hi - u
+            prv <= bottom && break                            # v[bottom] undecided; the bisection settles it
+            if Base.Order.lt(order, v[prv], x)
+                lo = prv + 1
+                break
+            end
+            hi = prv
+            u += u
+        end
+        return _bisect_first_to(v, x, lo, hi, order)
+    else
+        # v[g] < x: the answer is after g.
+        g == top && return top + one(g)
+        lo = g + 1                                            # v[lo - 1] < x
+        u = one(lo)
+        local hi
+        while true
+            nxt = lo + u
+            if nxt >= top
+                Base.Order.lt(order, v[top], x) && return top + one(g)
+                hi = top
+                break
+            end
+            if Base.Order.lt(order, v[nxt], x)
+                lo = nxt + 1
+                u += u
+            else
+                hi = nxt                                      # x ≤ v[hi]
+                break
+            end
+        end
+        return _bisect_first_to(v, x, lo, hi, order)
+    end
 end
 
 # ===========================================================================

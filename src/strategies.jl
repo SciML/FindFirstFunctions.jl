@@ -73,6 +73,14 @@ the hint; never worse than ~2 log₂ n comparisons.
 
 Maps to `KIND_BRACKET_GALLOP`. Falls back to [`BinaryBracket`](@ref) when
 no hint is supplied.
+
+When the hint is the answer (`v[hint] ≤ x < v[hint + 1]` for `searchsorted_last`,
+`v[hint - 1] < x ≤ v[hint]` for `searchsorted_first`) the result is returned after
+those two comparisons, so a caller that feeds each answer back as the next hint
+pays for the bracket and the bisection only when the query leaves the interval.
+For float vectors that ordering cost is then dominated by `isless` (the default
+`Base.Order.Forward`), which also orders NaN and signed zeros; a vector without
+NaN can pass `order = Base.Order.Lt(<)` for plain comparisons.
 """
 struct BracketGallop <: SearchStrategy end
 
