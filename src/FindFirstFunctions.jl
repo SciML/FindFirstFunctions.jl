@@ -14,6 +14,7 @@ export
     # Abstract type + concrete singleton strategies (friendly strategy values).
     SearchStrategy,
     LinearScan, SIMDLinearScan, BracketGallop, ExpFromLeft,
+    LinearBinarySearch,
     InterpolationSearch, BitInterpolationSearch,
     BinaryBracket, UniformStep, BisectThenSIMD,
     # Stateful strategies.

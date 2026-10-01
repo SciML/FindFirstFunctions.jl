@@ -28,6 +28,16 @@ strategy_kind(::GuesserHint) = throw(
     ),
 )
 
+# Parametric strategies (`LinearBinarySearch{MAX}`) don't map to a single
+# tag either: no one enum value can represent every `MAX`. They dispatch
+# via the struct multimethods below, which specialize on the type
+# parameter exactly like the singleton struct form constant-folds.
+strategy_kind(::LinearBinarySearch) = throw(
+    ArgumentError(
+        "LinearBinarySearch{MAX} is parametric and has no StrategyKind tag; pass the struct directly.",
+    ),
+)
+
 # Struct-valued entry points. `Auto` and `GuesserHint` define their own,
 # more specific `searchsorted_last` / `searchsorted_first` methods (in `auto.jl` and
 # `guesser.jl`), so this fallback only ever sees the zero-state singletons.
@@ -47,3 +57,25 @@ strategy_kind(::GuesserHint) = throw(
     s::SearchStrategy, v::AbstractVector, x, hint::Integer;
     order::Base.Order.Ordering = Base.Order.Forward,
 ) = searchsorted_first(strategy_kind(s), v, x, hint; order = order)
+
+# LinearBinarySearch struct entry points. `MAX` rides the type parameter
+# into the kernel, so a literal `LinearBinarySearch{k}()` compiles to the
+# same specialized code as the v2 `Base.searchsortedlast(::LinearBinarySearch{k}, ...)`
+# methods did. No hint (or, inside the kernel, an out-of-range hint) falls
+# through to the plain binary search — the linear walk has no anchor.
+@inline searchsorted_last(
+    ::LinearBinarySearch{MAX}, v::AbstractVector, x, hint::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) where {MAX} = _kernel_last_linear_binary_search(v, x, hint, order, Val(MAX))
+@inline searchsorted_first(
+    ::LinearBinarySearch{MAX}, v::AbstractVector, x, hint::Integer;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) where {MAX} = _kernel_first_linear_binary_search(v, x, hint, order, Val(MAX))
+@inline searchsorted_last(
+    ::LinearBinarySearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = _kernel_last_binary_bracket(v, x, order)
+@inline searchsorted_first(
+    ::LinearBinarySearch, v::AbstractVector, x;
+    order::Base.Order.Ordering = Base.Order.Forward,
+) = _kernel_first_binary_bracket(v, x, order)
